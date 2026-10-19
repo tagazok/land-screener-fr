@@ -1,0 +1,32 @@
+[project]
+name = "lsfr-pipeline"
+version = "0.1.0"
+description = "Land Screener FR data pipeline (v0: Gironde)"
+requires-python = ">=3.12"
+dependencies = [
+  "polars==1.17.1",
+  "openpyxl==3.1.5",
+  "shapely==2.0.6",
+  "pyshp==2.3.1",
+  "pyproj==3.7.0",
+  "python-calamine==0.3.1",
+  "boto3==1.43.114",
+  "scipy==1.14.1",
+  "numpy==2.1.3",
+]
+
+[dependency-groups]
+dev = ["pytest==8.3.4"]
+
+[project.scripts]
+lsfr = "lsfr.cli:main"
+
+[build-system]
+requires = ["hatchling==1.26.3"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lsfr"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

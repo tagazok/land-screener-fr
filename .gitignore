@@ -1,0 +1,9 @@
+raw/
+.kiro/
+.DS_Store
+node_modules/
+web/dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
