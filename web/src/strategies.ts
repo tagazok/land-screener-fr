@@ -126,6 +126,11 @@ export const COLUMNS: Record<string, ColumnInfo> = {
     def: 'Classement national de la tension du marché du logement, de A bis (le plus tendu) à C (le moins tendu). Il sert aux aides et dispositifs comme le prêt à taux zéro.',
     calc: 'arrêté en vigueur au 26 juin 2026.',
   },
+  risk_list: {
+    label: 'Lesquels', unit: 'text',
+    def: 'Les risques comptés dans « Risques signalés ».',
+    calc: 'voir « Risques signalés ». Le détail de chaque risque est dans la suite de cette section.',
+  },
   risk_count: {
     label: 'Risques signalés', unit: 'count',
     def: 'Nombre de signaux de risque, sur 9, pour comparer rapidement les communes. Indique qu’un risque est reconnu, pas sa gravité, ni si un bien précis est exposé.',
@@ -478,17 +483,19 @@ export const DAILY_SERVICES = ['gp', 'pharmacy', 'supermarket', 'bakery', 'prima
 export function derive(raw: Row[], type: PropertyType): Row[] {
   return raw.map((r) => {
     const n = (k: string) => (typeof r[k] === 'number' ? (r[k] as number) : null);
-    const risks = [
-      r.ppr_flood === true,
-      r.risk_marine_flood === true,
-      r.risk_forest_fire === true,
-      r.ppr_industrial === true,
-      (n('catnat_flood') ?? 0) >= 5,
-      n('radon_class') === 3,
-      (n('drought_days_avg') ?? 0) > 60,
-      (n('clay_high_share') ?? 0) > 0.5,
-      r.coast_retreat_decree === true,
-    ].filter(Boolean).length;
+    const signals: [boolean, string][] = [
+      [r.ppr_flood === true, 'plan de prévention inondation'],
+      [r.risk_marine_flood === true, 'submersion marine'],
+      [r.risk_forest_fire === true, 'feu de forêt'],
+      [r.ppr_industrial === true, 'plan de prévention des risques technologiques (site industriel)'],
+      [(n('catnat_flood') ?? 0) >= 5, `inondations répétées (${n('catnat_flood')} arrêtés de catastrophe naturelle)`],
+      [n('radon_class') === 3, 'radon (potentiel élevé)'],
+      [(n('drought_days_avg') ?? 0) > 60, `sécheresse (${Math.round(n('drought_days_avg') ?? 0)} jours de restriction d’eau par an)`],
+      [(n('clay_high_share') ?? 0) > 0.5, 'argiles (plus de la moitié de la commune en exposition forte)'],
+      [r.coast_retreat_decree === true, 'recul du trait de côte'],
+    ];
+    const hit = signals.filter(([on]) => on).map(([, l]) => l);
+    const risks = hit.length;
     const dists = DAILY_SERVICES.map((k) => n(`dist_${k}_km`)).filter((v): v is number => v !== null);
     return {
       ...r,
@@ -498,6 +505,7 @@ export function derive(raw: Row[], type: PropertyType): Row[] {
       rent_confidence: r[`rent_confidence_${type}`] ?? null,
       gross_yield: r[`gross_yield_${type}`] ?? null,
       risk_count: risks,
+      risk_list: hit.length ? hit.join(' ; ') : 'aucun',
       // Price change 2022 -> 2025 per property type, from the yearly medians (≥ 5 sales each year).
       price_trend_house: n('hist_house_2022') && n('hist_house_2025') ? n('hist_house_2025')! / n('hist_house_2022')! - 1 : null,
       price_trend_apt: n('hist_apt_2022') && n('hist_apt_2025') ? n('hist_apt_2025')! / n('hist_apt_2022')! - 1 : null,
@@ -891,7 +899,7 @@ export const DETAIL_GROUPS: { title: string; help?: string; columns: string[] }[
   { title: 'Écoles', columns: ['college_ips', 'college_ips_km', 'lycee_success', 'lycee_value_added', 'lycee_success_km'] },
   { title: 'Eau', columns: ['drinking_water_days_avg', 'drought_days_avg', 'crisis_days_avg', 'water_limit_breach_share'] },
   { title: 'Contamination', help: 'Eau du robinet (analyses 2025 des ARS) et inventaires des sols pollués (Géorisques). Pour un potager ou des poules, ces chiffres signalent une commune à vigilance ; seule une analyse de sol de votre terrain dit s’il est pollué.', columns: ['pesticide_breach_share', 'pesticide_samples', 'pfas_max', 'pfas_breach_share', 'pfas_samples', 'sis_count', 'polluted_site_count', 'casias_count', 'casias_per_km2'] },
-  { title: 'Sols, côte et risques', columns: ['risk_count', 'clay_high_share', 'clay_med_high_share', 'catnat_drought', 'ppr_flood', 'catnat_flood', 'risk_marine_flood', 'coast_retreat_decree', 'risk_coast_erosion', 'risk_forest_fire', 'ppr_industrial', 'radon_class'] },
+  { title: 'Sols, côte et risques', columns: ['risk_count', 'risk_list', 'clay_high_share', 'clay_med_high_share', 'catnat_drought', 'ppr_flood', 'catnat_flood', 'risk_marine_flood', 'coast_retreat_decree', 'risk_coast_erosion', 'risk_forest_fire', 'ppr_industrial', 'radon_class'] },
   { title: 'Fiscalité et règles', columns: ['tfpb_rate', 'tfpb_total_avg_eur', 'second_home_surcharge', 'zone_tendue', 'zone_abc'] },
 ];
 

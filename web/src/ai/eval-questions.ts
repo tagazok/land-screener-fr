@@ -18,6 +18,10 @@ export const QUESTIONS: EvalQuestion[] = [
   { id: 'small-growing', mode: 'answer', text: 'Je cherche un village de moins de 1500 habitants dont la population augmente', expect: ['pop:max', 'pop_cagr_11y:min'] },
   { id: 'no-flood-hills', mode: 'answer', text: 'Une commune vallonnée sans aucune inondation enregistrée, dans les Vosges', expect: ['relief_m:min', 'catnat_flood:max'] },
   { id: 'tourism-rising', mode: 'answer', text: 'Quelles communes deviennent de plus en plus touristiques ?', expect: ['second_homes_change:min'] },
+  {
+    id: 'followup', mode: 'answer', expect: ['none'],
+    text: 'Échange précédent :\nUtilisateur : Je cherche une ville du Nord avec un bon rendement\nAssistant : Roubaix correspond à votre recherche, avec un rendement brut de 7 %, mais un risque est identifié.\n\nNouvelle demande : quel est ce risque ?',
+  },
   { id: 'tiers-best', mode: 'action', text: 'Garde seulement les communes des groupes A et B', expect: ['tiers:AB'] },
   { id: 'tiers-below', mode: 'action', text: 'Seulement celles avec un score inférieur à C', expect: ['tiers:DE'] },
   {

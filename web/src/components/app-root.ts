@@ -341,7 +341,7 @@ export class AppRoot extends LitElement {
   /** Bridge for the assistant: it only ever goes through these two functions. */
   private chatHost: ChatHost = {
     applyPlan: (plan: Plan) => this.applyPlan(plan),
-    facts: () => this.chatFacts(),
+    facts: (context: string) => this.chatFacts(context),
   };
 
   private applyPlan(plan: Plan): { applied: string[]; dropped: string[] } {
@@ -392,17 +392,28 @@ export class AppRoot extends LitElement {
     return { applied, dropped };
   }
 
-  /** The best communes now shown, with the values the user filtered on, as compact text for the model. */
-  private chatFacts(): { count: number; text: string } {
+  /**
+   * Facts for the model: the best communes now shown, plus any commune named in the conversation
+   * (so a follow-up like "what is Roubaix's risk?" gets Roubaix's data), with the values the user filtered on.
+   */
+  private chatFacts(context = ''): { count: number; text: string } {
     const passing = this.results.filter((r) => r.pass).sort(compareScore);
-    const cols = [...new Set([...this.custom.map((f) => f.column), 'pop', 'town3000_name', 'town3000_km', 'price_m2', 'risk_count'])]
-      .filter((c) => c in COLUMNS).slice(0, 12);
-    const lines = passing.slice(0, 8).map((r) => {
-      const dep = this.depNames[r.row.dep as string] ?? r.row.dep;
-      const vals = cols.map((c) => `${COLUMNS[c].label} ${fmt(c, r.row[c])}`).join(' ; ');
-      return `- ${r.row.nom} (${dep}) : ${vals}`;
-    });
-    return { count: passing.length, text: `${passing.length} communes au total.\n${lines.join('\n')}` };
+    const cols = [...new Set([...this.custom.map((f) => f.column), 'pop', 'town3000_name', 'town3000_km', 'price_m2', 'risk_count', 'risk_list'])]
+      .filter((c) => c in COLUMNS).slice(0, 14);
+    const line = (row: Row, extra: string[] = []) => {
+      const dep = this.depNames[row.dep as string] ?? row.dep;
+      const vals = [...new Set([...cols, ...extra])].map((c) => `${COLUMNS[c]?.label ?? c} ${fmt(c, row[c])}`).join(' ; ');
+      return `- ${row.nom} (${dep}, code ${row.code}) : ${vals}`;
+    };
+    // Communes named in the question or the previous exchange (whole-word match, names of 4+ letters).
+    const ctx = ` ${fold(context)} `;
+    const named = context ? this.rows.filter((r) => r.nom.length >= 4 && ctx.includes(` ${fold(r.nom)} `)).slice(0, 5) : [];
+    const detail = ['risk_list', 'catnat_flood', 'ppr_flood', 'risk_forest_fire', 'radon_class', 'clay_high_share', 'pfas_max',
+      'pesticide_breach_share', 'sis_count', 'forest_around_share', 'relief_m', 'tour_beds_change', 'second_homes_change',
+      'median_income', 'apl_gp', 'crime_burglary', 'pop_cagr_11y'];
+    const parts = [`${passing.length} communes retenues par les critères actuels. Les meilleures :`, ...passing.slice(0, 8).map((r) => line(r.row))];
+    if (named.length) parts.push('', 'Communes citées dans la conversation (détail) :', ...named.map((r) => line(r, detail)));
+    return { count: passing.length + named.length, text: parts.join('\n') };
   }
 
   private updateSignal(id: string, weight: number) {

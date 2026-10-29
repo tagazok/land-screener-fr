@@ -8,7 +8,7 @@ import {
 /** What the chat needs from the app: apply a plan, then describe the communes it now shows. */
 export interface ChatHost {
   applyPlan(plan: Plan): { applied: string[]; dropped: string[] };
-  facts(): { count: number; text: string };
+  facts(context: string): { count: number; text: string };
 }
 
 interface Msg {
@@ -55,13 +55,16 @@ export class AiChat extends LitElement {
     const t0 = performance.now();
     try {
       this.busy = 'Je comprends la demande…';
-      const plan = await a.plan(text, this.abort.signal);
+      const before = this.history();
+      const plan = await a.plan(before ? `Échange précédent :\n${before}\n\nNouvelle demande : ${text}` : text, this.abort.signal);
       const { applied, dropped } = this.host.applyPlan(plan);
       const chips = [...applied, ...dropped.map((d) => `ignoré : ${d}`)];
       if (plan.mode === 'answer') {
         this.busy = 'Je rédige la réponse…';
-        const { count, text: facts } = this.host.facts();
-        const answer = count ? await a.answer(text, facts, this.abort.signal) : 'Aucune commune ne passe tous ces critères. Retirez un filtre (bouton × sur les étiquettes en haut) pour élargir la recherche.';
+        const prev = this.history();
+        const { count, text: facts } = this.host.facts(`${text} ${prev}`);
+        const question = prev ? `Échange précédent :\n${prev}\n\nNouvelle question : ${text}` : text;
+        const answer = count ? await a.answer(question, facts, this.abort.signal) : 'Aucune commune ne passe tous ces critères. Retirez un filtre (bouton × sur les étiquettes en haut) pour élargir la recherche.';
         this.msgs = [...this.msgs, { role: 'assistant', text: `${answer}\n\n${count} communes retenues.`, chips }];
       } else {
         this.msgs = [...this.msgs, { role: 'assistant', text: plan.summary || 'C’est fait.', chips }];
@@ -73,6 +76,12 @@ export class AiChat extends LitElement {
       this.busy = '';
       this.progress = null;
     }
+  }
+
+  /** The previous question and answer, so a follow-up ("what is that risk?") keeps its context. */
+  private history(): string {
+    const done = this.msgs.slice(0, -1).filter((m) => m.role !== 'error');
+    return done.slice(-2).map((m) => `${m.role === 'user' ? 'Utilisateur' : 'Assistant'} : ${m.text}`).join('\n');
   }
 
   private saveSettings(e: Event) {

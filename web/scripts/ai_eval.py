@@ -31,7 +31,10 @@ for q in qs:
     got = {f"{f['column']}:{f['op']}" for f in plan.get("filters", [])}
     if plan.get("tiers"):
         got.add("tiers:" + "".join(sorted(plan["tiers"])))
-    missing = [e for e in q["expect"] if not any(alt in got for alt in e.split("|"))]
+    if q["expect"] == ["none"]:  # a follow-up question must not add filters
+        missing = sorted(got) if got else []
+    else:
+        missing = [e for e in q["expect"] if not any(alt in got for alt in e.split("|"))]
     good = not missing and plan.get("mode") == q["mode"]
     ok += good
     print(f"{'OK ' if good else 'BAD'} {q['id']:15s} {time.time() - t:4.1f}s mode={plan.get('mode')} "

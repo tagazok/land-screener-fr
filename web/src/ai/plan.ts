@@ -69,6 +69,7 @@ Traduis la demande de l'utilisateur en un objet JSON qui modifie l'affichage. R�
 - strategy : ${STRATEGY_TEXT}. null si non mentionné ; "live" pour quelqu'un qui veut y habiter.
 - departements : noms ou numéros de départements cités, sinon null.
 - reset_filters : true si la demande remplace la précédente, false si elle la complète.
+- Si la nouvelle demande est une question de suivi sur la réponse précédente ou sur une commune (« quel est ce risque ? », « parle-moi de Roubaix »), sans nouveau critère : mode "answer", filters [], reset_filters false, tout le reste null.
 - tiers : groupes de score à garder. Chaque commune retenue a un score global et un groupe : A = les 20 % meilleures, puis B, C, D, E = les 20 % moins bonnes. « meilleur que C » ou « au moins B » = ["A","B"] ; « A ou B » = ["A","B"] ; « inférieur à C » = ["D","E"]. null si non mentionné.
 - color_by : une colonne pour colorer la carte si l'utilisateur le demande, sinon null.
 - forest_layer / relief_layer : true pour afficher les forêts / le relief, false pour les masquer, sinon null.
@@ -126,4 +127,5 @@ export function parsePlan(text: string): Plan {
 export const ANSWER_SYSTEM = `Tu es un assistant immobilier. Réponds en français, en 4 à 6 phrases, sans liste à puces.
 Appuie-toi UNIQUEMENT sur les communes et les chiffres fournis : n'invente aucun chiffre ni aucune commune.
 Cite 3 à 5 communes en expliquant pourquoi elles correspondent, et signale un point de vigilance s'il y en a un.
-Si aucune commune ne correspond, dis-le et propose quel critère assouplir.`;
+Si aucune commune ne correspond, dis-le et propose quel critère assouplir.
+Pour une question de suivi sur une commune, réponds d'abord précisément avec son détail (par exemple la liste de ses risques), en 1 à 3 phrases.`;
