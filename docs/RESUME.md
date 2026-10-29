@@ -85,3 +85,9 @@ Known limits / next:
   and fetched when a commune of that département is opened; `summaries.json` is gone. `uv run lsfr summarize --publish-only`
   rewrites them from `raw/ai/summaries-cache.json` without calling Bedrock. Startup shows a loading card with MB received.
   New filters `pop` (min) and `popmax` (max inhabitants) on every strategy, off by default (medium keeps pop ≥ 8 000 on).
+- 2026-10-29: contamination. `uv run python -m lsfr.water_fetch` reduces the DIS 2025 per-substance results to
+  raw/dep/XX/dis-result-2025.parquet (limited parameters only); `uv run python -m lsfr.soil_fetch` pulls Géorisques
+  SIS, sites pollués (ex-BASOL) and CASIAS (per département) into raw/extra/*.csv. `contamination.py` builds
+  pesticide_breach_share, pfas_max, pfas_breach_share (+ sample counts), sis_count, polluted_site_count, casias_count,
+  casias_per_km2 (build step "contamination", cached). New "Contamination" side-panel section; 5 filters on every
+  strategy, all off by default (strategy-fit unchanged, AI summaries still valid).

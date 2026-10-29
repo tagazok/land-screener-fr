@@ -5,6 +5,7 @@ const eur0 = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR'
 const eur1 = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const int = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 });
 const one = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
+const ugl = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 });
 const pct = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 1 });
 // Small rates (population growth, price change) need more digits, or -0.04 % reads as "-0 %".
 const pctSmall = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 2 });
@@ -28,6 +29,8 @@ export function fmt(column: string, v: Value | undefined): string {
       return `${one.format(v)} %`;
     case 'km':
       return v === 0 ? 'sur place' : `${one.format(v)} km`;
+    case 'ugl':
+      return `${ugl.format(v)} µg/L`;
     case 'days':
     case 'density':
     case 'count':
