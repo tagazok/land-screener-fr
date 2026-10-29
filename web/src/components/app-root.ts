@@ -111,6 +111,10 @@ export class AppRoot extends LitElement {
   @state() private systemDark = false;
   @state() private summaries: Record<string, string> = {};
   @state() private summaryMeta: { model: string; generated: string } | null = null;
+  /** AI summaries are fetched one département at a time, when one of its communes is opened. */
+  @state() private summaryDeps: Record<string, 'loading' | 'done'> = {};
+  /** Megabytes of commune data received so far; null once the data is loaded. */
+  @state() private loadingMb: number | null = 0;
   @state() private error: string | null = null;
   @state() private copied = false;
   @query('map-view') private mapView!: MapView;
@@ -150,7 +154,7 @@ export class AppRoot extends LitElement {
   private async load() {
     try {
       const [data, dep, meta] = await Promise.all([
-        fetch('./data/communes.json').then((r) => r.json()),
+        this.fetchWithProgress('./data/communes.json'),
         fetch('./data/departements.geojson').then((r) => r.json()),
         fetch('./data/metadata.json').then((r) => r.json()),
       ]);
@@ -160,19 +164,55 @@ export class AppRoot extends LitElement {
         (dep as GeoJSON.FeatureCollection).features.map((f) => [f.properties!.code, f.properties!.nom]),
       );
       this.meta = meta;
-      // AI summaries are optional: the app works without the file.
-      fetch('./data/summaries.json')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => {
-          if (d?.summaries) {
-            this.summaries = d.summaries;
-            this.summaryMeta = { model: d.model, generated: d.generated };
-          }
-        })
-        .catch(() => undefined);
+      this.loadingMb = null;
     } catch (e) {
       this.error = `Impossible de charger les données : ${(e as Error).message}`;
     }
+  }
+
+  /** Fetch JSON while reporting the megabytes received, so a slow connection shows progress. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async fetchWithProgress(url: string): Promise<any> {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${url} : HTTP ${r.status}`);
+    if (!r.body) return r.json();
+    const reader = r.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      this.loadingMb = got / 1e6;
+    }
+    const all = new Uint8Array(got);
+    let at = 0;
+    for (const c of chunks) { all.set(c, at); at += c.length; }
+    return JSON.parse(new TextDecoder().decode(all));
+  }
+
+  /** Load the AI summaries of a département (optional: the app works without them). */
+  private loadSummaries(dep: string) {
+    if (this.summaryDeps[dep]) return;
+    this.summaryDeps = { ...this.summaryDeps, [dep]: 'loading' };
+    fetch(`./data/summaries/${dep}.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.summaries) {
+          this.summaries = { ...this.summaries, ...d.summaries };
+          this.summaryMeta ??= { model: d.model, generated: d.generated };
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => (this.summaryDeps = { ...this.summaryDeps, [dep]: 'done' }));
+  }
+
+  willUpdate() {
+    // Fetch the summaries of the opened commune's département (from a click or a shared link).
+    if (!this.selected || !this.raw.length) return;
+    const row = this.raw.find((x) => x.code === this.selected);
+    if (row) this.loadSummaries(row.dep as string);
   }
 
   private applyUrl(hash: string) {
@@ -495,6 +535,16 @@ export class AppRoot extends LitElement {
       </div>
 
       ${this.settingsOpen ? this.renderSettings(results, st.label) : nothing}
+      ${this.loadingMb !== null ? html`
+        <div class="loading" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <div>
+            <b>Chargement des données des communes…</b>
+            <small>${this.loadingMb > 0.05 ? `${this.loadingMb.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} Mo sur environ 30 Mo reçus` : 'Connexion…'}
+              · quelques secondes sur une bonne connexion</small>
+            <progress max="30" value=${Math.min(30, this.loadingMb)}></progress>
+          </div>
+        </div>` : nothing}
     `;
   }
 
@@ -804,6 +854,11 @@ export class AppRoot extends LitElement {
             <section class="ai" aria-label="Résumé IA">
               <div class="ai-head"><span class="ai-badge">✦ Résumé IA</span>${tip('Résumé IA', `Paragraphe rédigé automatiquement par un modèle d’IA (${this.summaryMeta?.model.replace(/^us\./, '') ?? ''}, via Amazon Bedrock) à partir des seules données de cette page, le ${this.summaryMeta ? new Date(this.summaryMeta.generated).toLocaleDateString('fr-FR') : ''}.\n\nIl résume la commune en général, puis explique pour quels projets l’outil la retient ou l’écarte avec les réglages par défaut de chaque stratégie (pas avec vos réglages personnalisés). Il peut contenir des erreurs : vérifiez les chiffres dans le détail ci-dessous.`)}</div>
               <p>${this.summaries[row.code]}</p>
+            </section>`
+          : this.summaryDeps[row.dep as string] === 'loading' ? html`
+            <section class="ai" aria-label="Résumé IA" aria-busy="true">
+              <div class="ai-head"><span class="ai-badge">✦ Résumé IA</span></div>
+              <p class="muted"><span class="spinner small" aria-hidden="true"></span> Chargement du résumé…</p>
             </section>` : nothing}
 
           ${hl.good.length || hl.bad.length ? html`
@@ -1119,6 +1174,18 @@ export class AppRoot extends LitElement {
     .ai-head { display: flex; align-items: center; }
     .ai-badge { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--brand-2); }
     .ai p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.55; }
+    .ai p.muted { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+
+    /* ---- loading ---- */
+    .loading { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 60; display: flex; gap: 14px; align-items: center;
+      background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; box-shadow: 0 12px 40px rgba(0, 0, 0, .18); min-width: 320px; }
+    .loading div { display: flex; flex-direction: column; gap: 4px; }
+    .loading small { color: var(--muted); font-size: 12.5px; }
+    .loading progress { width: 100%; height: 6px; accent-color: var(--brand-2); }
+    .spinner { width: 26px; height: 26px; flex: none; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--brand-2); animation: spin .9s linear infinite; }
+    .spinner.small { width: 14px; height: 14px; border-width: 2px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
 
     /* ---- table ---- */
     .tablebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
@@ -1218,7 +1285,7 @@ export class AppRoot extends LitElement {
     .ftitle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
     .fval { display: inline-flex; align-items: center; gap: 4px; }
     .fval i { font-style: normal; color: var(--muted); }
-    .fval input { width: 66px; font: inherit; padding: 5px 8px; border: 1px solid var(--input-line); border-radius: 8px; box-sizing: border-box; text-align: right; background: var(--input-bg); color: var(--ink); }
+    .fval input { width: 84px; font: inherit; padding: 5px 8px; border: 1px solid var(--input-line); border-radius: 8px; box-sizing: border-box; text-align: right; background: var(--input-bg); color: var(--ink); }
     .fval input:focus { outline: 2px solid var(--brand-2); outline-offset: 0; border-color: transparent; }
     .fval input:disabled { opacity: .45; }
     .fcount { color: var(--bad); font-size: 12px; font-weight: 600; text-align: right; }

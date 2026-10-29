@@ -562,6 +562,14 @@ export const STRATEGIES: Strategy[] = [
   },
 ];
 
+// Every strategy gets a population range (min and max inhabitants) at the top of its filters.
+// Off by default except the medium-term minimum, so presets and AI summaries are unchanged.
+for (const st of STRATEGIES) {
+  const rest = st.filters.filter((x) => x.id !== 'pop');
+  const min = st.filters.find((x) => x.id === 'pop') ?? f('pop', 'pop', 'min', 1000, false);
+  st.filters = [min, f('popmax', 'pop', 'max', 20000, false), ...rest];
+}
+
 export const FILTERS: Record<string, { label: string; help: string }> = {
   yield: {
     label: 'Rendement brut minimum',
@@ -588,8 +596,12 @@ export const FILTERS: Record<string, { label: string; help: string }> = {
     help: 'Élimine les communes restées plus longtemps que ce nombre de jours par an en restriction d’eau renforcée ou en crise (moyenne 2021–2025). Important pour un jardin, un potager, une piscine ou un projet agricole.',
   },
   pop: {
-    label: 'Population minimum',
-    help: 'Élimine les communes trop petites pour avoir une demande régulière en moyenne durée (étudiants, salariés en mission).',
+    label: 'Population minimum (habitants)',
+    help: 'Élimine les communes de moins de ce nombre d’habitants. En moyenne durée, il faut une ville assez grande pour une demande régulière (étudiants, salariés en mission).',
+  },
+  popmax: {
+    label: 'Population maximum (habitants)',
+    help: 'Élimine les communes de plus de ce nombre d’habitants, par exemple pour ne garder que des villages ou des petites villes. À combiner avec la population minimum pour une fourchette.',
   },
   tourism: {
     label: 'Lits touristiques min. /1000 hab.',

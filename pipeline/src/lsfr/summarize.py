@@ -1,7 +1,8 @@
 """Generate a short AI summary per commune with Amazon Bedrock (offline, cached).
 
 The web app is static, so summaries are produced once here and shipped as
-web/public/data/summaries.json. Each summary is cached by a hash of the facts,
+web/public/data/summaries/<dep>.json (one file per département, fetched by the
+app when a commune is opened). Each summary is cached by a hash of the facts,
 model and prompt version: re-running only calls Bedrock for communes whose
 data changed.
 
@@ -208,12 +209,41 @@ def _call(client, text: str) -> tuple[str, dict]:
     return summary, usage
 
 
-def summarize(data_dir: Path, cache_path: Path, limit: int | None = None, workers: int = 6,
-              depts: list[str] | None = None) -> None:
-    import boto3
+def write_summaries(data_dir: Path, cache: dict, dep_of: dict[str, str]) -> int:
+    """Publish one summaries/<dep>.json per département (the app fetches one when a commune is opened).
 
+    Also writes into web/dist so a running preview picks them up. Returns the number of summaries.
+    """
+    per_dep: dict[str, dict[str, str]] = {}
+    for c, v in sorted(cache.items()):
+        if c in dep_of:
+            per_dep.setdefault(dep_of[c], {})[c] = v["text"]
+    head = {"model": MODEL_ID, "prompt_version": PROMPT_VERSION, "generated": date.today().isoformat()}
+    for d in (data_dir, data_dir.parents[1] / "dist" / "data"):
+        if not d.is_dir():
+            continue
+        out_dir = d / "summaries"
+        out_dir.mkdir(exist_ok=True)
+        for dep, summaries in per_dep.items():
+            blob = json.dumps({**head, "summaries": summaries}, ensure_ascii=False, separators=(",", ":"))
+            tmp = out_dir / f"{dep}.json.tmp"
+            tmp.write_text(blob)
+            tmp.replace(out_dir / f"{dep}.json")  # atomic: the browser never reads a half-written file
+        (d / "summaries.json").unlink(missing_ok=True)  # old single-file format
+    return sum(len(s) for s in per_dep.values())
+
+
+def summarize(data_dir: Path, cache_path: Path, limit: int | None = None, workers: int = 6,
+              depts: list[str] | None = None, publish_only: bool = False) -> None:
     d = json.loads((data_dir / "communes.json").read_text())
     rows = [dict(zip(d["cols"], vals)) for vals in zip(*d["cols"].values())]
+    if publish_only:
+        cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
+        n = write_summaries(data_dir, cache, {r["code"]: r["dep"] for r in rows})
+        print(f"published {n} summaries from the cache (no Bedrock call)", flush=True)
+        return
+    import boto3
+
     by_dep: dict[str, list[dict]] = {}
     for r in rows:
         by_dep.setdefault(r["dep"], []).append(r)
@@ -243,25 +273,13 @@ def summarize(data_dir: Path, cache_path: Path, limit: int | None = None, worker
     client = boto3.client("bedrock-runtime", region_name=REGION)
     tokens_in = tokens_out = 0
     done = failed = 0
-    codes = {r["code"] for r in rows}
+    dep_of = {r["code"]: r["dep"] for r in rows}
 
     def publish() -> int:
-        """Write the cache and summaries.json (also into web/dist so a running preview picks it up)."""
+        """Write the cache, then the per-département summary files."""
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=0))
-        out = {
-            "model": MODEL_ID,
-            "prompt_version": PROMPT_VERSION,
-            "generated": date.today().isoformat(),
-            "summaries": {c: v["text"] for c, v in sorted(cache.items()) if c in codes},
-        }
-        blob = json.dumps(out, ensure_ascii=False, separators=(",", ":"))
-        for d in (data_dir, data_dir.parents[1] / "dist" / "data"):
-            if d.is_dir():
-                tmp = d / "summaries.json.tmp"
-                tmp.write_text(blob)
-                tmp.replace(d / "summaries.json")  # atomic: the browser never reads a half-written file
-        return len(out["summaries"])
+        return write_summaries(data_dir, cache, dep_of)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {pool.submit(_call, client, text): (code, k) for code, text, k in todo}
