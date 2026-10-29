@@ -988,6 +988,7 @@ export class AppRoot extends LitElement {
     return html`
       <details open class="grp">
         <summary>Tourisme : évolution${tip('Tourisme : évolution', HELP.tourism)}</summary>
+        ${beds.some((b) => b > 0) ? html`
         <svg class="hist" viewBox="0 0 ${W} ${H}" role="img" aria-label="Lits touristiques par an, 2015 à 2026">
           ${[0, max / 2, max].map((v) => svg`<text x=${padL - 4} y=${y(v) + 3} text-anchor="end" class="ax">${int(v)}</text>
             <line x1=${padL} x2=${W} y1=${y(v)} y2=${y(v)} class="grid"></line>`)}
@@ -996,7 +997,8 @@ export class AppRoot extends LitElement {
           ${years.map((yy, i) => (i % 2 === 0 || i === years.length - 1)
             ? svg`<text x=${padL + (i + 0.5) * bw} y=${H - 3} text-anchor="middle" class="ax">${yy.slice(2)}</text>` : nothing)}
         </svg>
-        <div class="legendrow"><span><i style="background:var(--brand-2)"></i>Lits touristiques (hôtels, campings, résidences, villages vacances), 2015–2026</span></div>
+        <div class="legendrow"><span><i style="background:var(--brand-2)"></i>Lits touristiques (hôtels, campings, résidences, villages vacances), 2015–2026</span></div>`
+        : html`<p class="muted small">Aucun hôtel, camping, village vacances ni résidence de tourisme recensé par l’INSEE dans la commune entre 2015 et 2026 (c’est le cas de 7 communes sur 10, surtout des villages). Les gîtes et meublés de particuliers ne sont pas comptés : regardez plutôt l’évolution des résidences secondaires ci-dessous.</p>`}
         <dl class="kv">
           <dt>Résidences secondaires ${homes.map(([yy]) => yy).join(' / ')}${colTip('second_homes_change')}</dt>
           <dd>${homes.map(([, v]) => (v === null ? '—' : int(v))).join(' / ')}</dd>
