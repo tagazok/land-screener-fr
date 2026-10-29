@@ -598,6 +598,8 @@ export class AppRoot extends LitElement {
                         ${t === 'house' ? 'Maison' : 'Appartement'}</button>`)}
                   </div>${tip('Type de bien', HELP.type)}` : nothing}
                 ${active.map((f) => html`<span class="chip">${this.filterChip(f)}</span>`)}
+                ${this.custom.length + this.tiers.length > 1 ? html`<button class="chip clear" @click=${() => { this.custom = []; this.tiers = []; this.pushUrl(); }}
+                  title="Retirer tous les filtres ajoutés (en vert)">Effacer les filtres ajoutés ×</button>` : nothing}
                 ${this.tiers.length ? html`<span class="chip custom" title="Filtre ajouté">Groupes ${this.tiers.join(', ')}<button aria-label="Retirer le filtre sur les groupes" @click=${() => { this.tiers = []; this.pushUrl(); }}>×</button></span>` : nothing}
                 ${this.custom.map((f) => html`<span class="chip custom" title="Filtre ajouté">${this.filterChip(f)}<button aria-label="Retirer le filtre ${this.filterChip(f)}" @click=${() => this.removeCustom(f.id)}>×</button></span>`)}
               </div>
@@ -1215,6 +1217,8 @@ export class AppRoot extends LitElement {
     .chip.custom { border-color: var(--brand-2); background: var(--brand-soft); display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
     .chip.custom button { border: 0; background: transparent; color: var(--brand-2); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 5px; border-radius: 999px; }
     .chip.custom button:hover { background: var(--surface); }
+    .chip.clear { cursor: pointer; font: inherit; font-size: 12.5px; color: var(--brand-2); border-style: dashed; }
+    .chip.clear:hover { background: var(--brand-soft); }
     .seg { display: inline-flex; background: var(--seg-bg); border-radius: 999px; padding: 3px; margin-right: 2px; }
     .seg button { border: 0; background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--muted); font-weight: 500; }
     .seg button.on { background: var(--surface); color: var(--brand); font-weight: 650; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
