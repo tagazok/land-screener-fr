@@ -10,6 +10,7 @@ import {
   type PropertyType, type StrategyId,
 } from '../strategies';
 import { customFilter, decode, encode } from '../url';
+import { adLinks, firstPostcode } from '../links';
 import { TIER_COLORS, type Bounds, type MapView, type Paint } from './map-view';
 import './map-view';
 import './info-tip';
@@ -411,14 +412,14 @@ export class AppRoot extends LitElement {
    * Facts for the model: the best communes now shown, plus any commune named in the conversation
    * (so a follow-up like "what is Roubaix's risk?" gets Roubaix's data), with the values the user filtered on.
    */
-  private chatFacts(context = ''): { count: number; text: string; communes: { code: string; nom: string }[] } {
+  private chatFacts(context = ''): { count: number; text: string; communes: { code: string; nom: string; ads: { label: string; url: string }[] }[] } {
     const passing = this.results.filter((r) => r.pass).sort(compareScore);
     const cols = [...new Set([...this.custom.map((f) => f.column), 'pop', 'town3000_name', 'town3000_km', 'price_m2', 'risk_count', 'risk_list'])]
       .filter((c) => c in COLUMNS).slice(0, 14);
     const line = (row: Row, extra: string[] = []) => {
       const dep = this.depNames[row.dep as string] ?? row.dep;
       const vals = [...new Set([...cols, ...extra])].map((c) => `${COLUMNS[c]?.label ?? c} ${fmt(c, row[c])}`).join(' ; ');
-      return `- ${row.nom} (${dep}, code ${row.code}) : ${vals}`;
+      return `- ${row.nom} (${dep}, code INSEE ${row.code}, code postal ${row.postcodes ?? '?'}) : ${vals}`;
     };
     // Communes named in the question or the previous exchange (whole-word match, names of 4+ letters).
     const ctx = ` ${fold(context)} `;
@@ -429,7 +430,7 @@ export class AppRoot extends LitElement {
     const parts = [`${passing.length} communes retenues par les critères actuels. Les meilleures :`, ...passing.slice(0, 8).map((r) => line(r.row))];
     if (named.length) parts.push('', 'Communes citées dans la conversation (détail) :', ...named.map((r) => line(r, detail)));
     // Names the answer may cite: the communes listed for the model, plus the next best ones it may mention.
-    const communes = [...passing.slice(0, 40).map((r) => r.row), ...named].map((r) => ({ code: r.code, nom: r.nom }));
+    const communes = [...passing.slice(0, 40).map((r) => r.row), ...named].map((r) => ({ code: r.code, nom: r.nom, ads: adLinks(r) }));
     return { count: passing.length + named.length, text: parts.join('\n'), communes };
   }
 
@@ -513,7 +514,9 @@ export class AppRoot extends LitElement {
     let list = this.showFailing ? [...results] : results.filter((r) => r.pass);
     if (this.search.trim()) {
       const q = fold(this.search.trim());
-      list = list.filter((r) => fold(r.row.nom).includes(q) || r.row.code.startsWith(q));
+      // Name, INSEE code, or postal code ("33700" finds Mérignac).
+      list = list.filter((r) => fold(r.row.nom).includes(q) || r.row.code.startsWith(q)
+        || (/^\d{2,5}$/.test(q) && typeof r.row.postcodes === 'string' && r.row.postcodes.split(' ').some((p) => p.startsWith(q))));
     }
     const s = this.sort;
     if (!s) {
@@ -972,6 +975,9 @@ export class AppRoot extends LitElement {
             <div>
               <h3>${row.nom}</h3>
               <small>${fmt('pop', row.pop)} habitants · ${row.aav_category ?? ''}</small>
+              ${row.postcodes ? html`<small class="cp" title="Codes postaux">${String(row.postcodes).split(' ').length > 4
+                ? `${String(row.postcodes).split(' ').slice(0, 3).join(', ')}… (${String(row.postcodes).split(' ').length} codes postaux)`
+                : String(row.postcodes).split(' ').join(', ')}</small>` : nothing}
             </div>
           </div>
           <button class="close" aria-label="Fermer le panneau" title="Fermer (Échap)" @click=${() => this.select(null)}>×</button>
@@ -1016,6 +1022,11 @@ export class AppRoot extends LitElement {
               })}</div>
             </details>` : nothing}
 
+          ${adLinks(row).length ? html`
+            <div class="ads">
+              <span class="label">Annonces leboncoin${tip('Annonces', 'Liens vers une recherche leboncoin sur cette commune (code postal ' + (firstPostcode(row) ?? '') + '), ouverte dans un nouvel onglet. Les liens sont construits par l’application ; leboncoin peut changer le format de ses adresses.')}</span>
+              ${adLinks(row).map((l) => html`<a href=${l.url} target="_blank" rel="noopener noreferrer">${l.label} ↗</a>`)}
+            </div>` : nothing}
           ${this.detailWarnings(row)}
           ${this.renderSimulation(row)}
           ${this.renderHistory(row)}
@@ -1403,6 +1414,11 @@ export class AppRoot extends LitElement {
     .sn-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 16px 18px 14px; border-bottom: 1px solid var(--line); }
     .sn-title { display: flex; align-items: center; gap: 12px; }
     .sn-head h3 { margin: 0; font-size: 20px; letter-spacing: -.02em; } .sn-head small { color: var(--muted); }
+    .sn-head small.cp { display: block; margin-top: 2px; }
+    .ads { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); font-size: 12.5px; }
+    .ads .label { display: inline-flex; align-items: center; font-weight: 650; color: var(--ink-2); width: 100%; }
+    .ads a { color: var(--brand-2); text-decoration: none; font-weight: 600; }
+    .ads a:hover { text-decoration: underline; }
     .sn-body { overflow-y: auto; padding: 14px 18px 30px; display: flex; flex-direction: column; gap: 12px; }
     .sn-score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .sn-score > div { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }

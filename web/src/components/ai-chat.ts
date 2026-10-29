@@ -19,6 +19,8 @@ export interface ChatHost {
 export interface Commune {
   code: string;
   nom: string;
+  /** Listing-site links built by the app (see links.ts). */
+  ads?: { label: string; url: string }[];
 }
 
 interface Msg {
@@ -40,7 +42,13 @@ const EXAMPLES = [
  * (no scripts, styles, images, iframes or forms); links open in a new tab.
  */
 function renderMarkdown(text: string, communes: Commune[] = []) {
-  const raw = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
+  // The model writes {{annonces:CODE}}; the app swaps in links it builds itself, only for communes it sent.
+  const byCode = new Map(communes.map((c) => [c.code, c]));
+  const withAds = text.replace(/\{\{\s*annonces\s*:\s*([0-9AB]{5})\s*\}\}/gi, (_, code: string) => {
+    const c = byCode.get(code.toUpperCase());
+    return c?.ads?.length ? `leboncoin : ${c.ads.map((a) => `[${a.label}](${a.url})`).join(' · ')}` : '';
+  });
+  const raw = marked.parse(withAds, { async: false, gfm: true, breaks: true }) as string;
   const clean = DOMPurify.sanitize(raw, {
     ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'b', 'i', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
       'h3', 'h4', 'h5', 'blockquote', 'code', 'pre', 'hr', 'a', 'del'],

@@ -385,6 +385,7 @@ COLUMNS = {
     "forest_around_share": ("ratio", "Share of tree cover within ~5 km (ESA WorldCover 2021)"),
     "town3000_km": ("km", "Distance to the nearest commune of 3,000+ residents (0 = itself)"),
     "town3000_name": ("text", "Nearest commune of 3,000+ residents"),
+    "postcodes": ("text", "Postal codes of the commune, space-separated (geo.api.gouv.fr)"),
     "tour_beds_change": ("ratio", "Change in tourist beds 2019 -> 2026 (INSEE)"),
     "tour_beds_added": ("beds", "Tourist beds added 2019 -> 2026"),
     "second_homes_2022": ("count", "Second homes 2022"),
@@ -485,6 +486,11 @@ def build(raw: Path, out: Path) -> None:
     if "casias_count" in df.columns:  # area (km²) = population / density
         df = df.with_columns((pl.col("casias_count") * pl.col("density") / pl.col("pop")).alias("casias_per_km2"))
     df = df.join(nature.nearest_town(df), on="code", how="left")
+    cp_path = raw / "extra" / "codes-postaux.json"
+    if cp_path.exists():  # geo.api.gouv.fr/communes?fields=code,codesPostaux (one call, no geometry)
+        cp = pl.DataFrame([{"code": c["code"], "postcodes": " ".join(sorted(set(c.get("codesPostaux") or [])))}
+                           for c in json.loads(cp_path.read_text())])
+        df = df.join(cp.filter(pl.col("postcodes") != ""), on="code", how="left")
     # Absent from an INSEE tourism file = no tourist accommodation that year.
     df = df.with_columns(*(pl.col(f"tour_beds_{y}").fill_null(0) for y in tourism.YEARS if f"tour_beds_{y}" in df.columns))
     # Boolean risk flags: absent from a source list means "not declared", not unknown.

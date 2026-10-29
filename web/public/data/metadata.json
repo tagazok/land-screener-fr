@@ -572,6 +572,10 @@
    "unit": "text",
    "label": "Nearest commune of 3,000+ residents"
   },
+  "postcodes": {
+   "unit": "text",
+   "label": "Postal codes of the commune, space-separated (geo.api.gouv.fr)"
+  },
   "tour_beds_change": {
    "unit": "ratio",
    "label": "Change in tourist beds 2019 -> 2026 (INSEE)"
@@ -811,6 +815,7 @@
   "forest_around_share": 1.0,
   "town3000_km": 1.0,
   "town3000_name": 1.0,
+  "postcodes": 1.0,
   "tour_beds_change": 0.227,
   "tour_beds_added": 0.993,
   "second_homes_2022": 0.993,
