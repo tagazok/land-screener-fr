@@ -24,13 +24,15 @@ export interface Plan {
   relief_layer: boolean | null;
   /** One short sentence, in French, restating what was understood. */
   summary: string;
+  /** The answer needs information that is not in the data (news, projects, local life…): search the web. */
+  web_search: boolean;
 }
 
 export function planSchema(columns: string[] = CATALOG_IDS) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['mode', 'strategy', 'departements', 'reset_filters', 'filters', 'tiers', 'color_by', 'forest_layer', 'relief_layer', 'summary'],
+    required: ['mode', 'strategy', 'departements', 'reset_filters', 'filters', 'tiers', 'color_by', 'forest_layer', 'relief_layer', 'summary', 'web_search'],
     properties: {
       mode: { type: 'string', enum: ['answer', 'action'] },
       strategy: { type: ['string', 'null'], enum: [...STRATEGY_IDS, null] },
@@ -52,6 +54,7 @@ export function planSchema(columns: string[] = CATALOG_IDS) {
       forest_layer: { type: ['boolean', 'null'] },
       relief_layer: { type: ['boolean', 'null'] },
       summary: { type: 'string', maxLength: 300 },
+      web_search: { type: 'boolean' },
     },
   } as const;
 }
@@ -74,6 +77,7 @@ Traduis la demande de l'utilisateur en un objet JSON qui modifie l'affichage. R�
 - color_by : une colonne pour colorer la carte si l'utilisateur le demande, sinon null.
 - forest_layer / relief_layer : true pour afficher les forêts / le relief, false pour les masquer, sinon null.
 - summary : une phrase en français qui résume ce que tu as compris.
+- web_search : true SEULEMENT si la réponse demande une information absente des colonnes ci-dessous : actualités, projets d'aménagement, vie locale, événements, associations, avis d'habitants, annonces ou prix actuels sur les sites, transports précis, etc. (mode "answer"). false pour tout ce que les colonnes couvrent (prix DVF, risques, eau, population, écoles…).
 Correspondances utiles :
 ${hints.map((h) => `- ${h}`).join('\n') || '- (aucune)'}
 Colonnes disponibles :
@@ -121,8 +125,13 @@ export function parsePlan(text: string): Plan {
     forest_layer: typeof p.forest_layer === 'boolean' ? p.forest_layer : null,
     relief_layer: typeof p.relief_layer === 'boolean' ? p.relief_layer : null,
     summary: String(p.summary ?? ''),
+    web_search: p.web_search === true,
   };
 }
+
+export const WEB_SYSTEM = `Tu es un assistant immobilier. Réponds en français, de façon concise (Markdown autorisé : gras, listes, tableaux).
+Cherche sur le web les informations récentes nécessaires. Les données de l'application ci-dessous sont fiables : utilise-les en priorité et ne les contredis pas.
+N'écris pas d'adresses web dans le texte : les sources sont affichées à part.`;
 
 export const ANSWER_SYSTEM = `Tu es un assistant immobilier. Réponds en français, de façon concise.
 Tu peux utiliser le Markdown : **gras**, listes à puces ou numérotées, et des tableaux quand tu compares plusieurs communes ou si l'utilisateur en demande un. Pas de titres de niveau 1 ou 2.

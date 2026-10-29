@@ -29,6 +29,8 @@ interface Msg {
   chips?: string[];
   /** Communes the model was told about: their names in the answer become links. */
   communes?: Commune[];
+  /** Web pages a web-search answer is based on. */
+  sources?: { url: string; domain: string }[];
 }
 
 const EXAMPLES = [
@@ -190,8 +192,16 @@ export class AiChat extends LitElement {
         const prev = this.history();
         const { count, text: facts, communes } = this.host.facts(`${text} ${prev}`);
         const question = prev ? `Échange précédent :\n${prev}\n\nNouvelle question : ${text}` : text;
-        const answer = count ? await a.answer(question, facts, this.abort.signal) : 'Aucune commune ne passe tous ces critères. Retirez un filtre (bouton × sur les étiquettes en haut) pour élargir la recherche.';
-        this.msgs = [...this.msgs, { role: 'assistant', text: `${answer}\n\n${count} communes retenues.`, chips, communes }];
+        // Route: questions the data cannot answer (news, local life…) go to the web-search model.
+        if (plan.web_search && a.webAnswer) {
+          this.busy = 'Je cherche sur le web…';
+          const web = await a.webAnswer(question, facts, this.abort.signal);
+          this.msgs = [...this.msgs, { role: 'assistant', text: web.text, chips: [...chips, '🌐 recherche web'], communes, sources: web.sources }];
+        } else {
+          const answer = count ? await a.answer(question, facts, this.abort.signal) : 'Aucune commune ne passe tous ces critères. Retirez un filtre (bouton × sur les étiquettes en haut) pour élargir la recherche.';
+          const note = plan.web_search ? '\n\n_Cette question demanderait une recherche sur le web : activez-la dans les réglages ⚙ (Amazon Bedrock)._' : '';
+          this.msgs = [...this.msgs, { role: 'assistant', text: `${answer}\n\n${count} communes retenues.${note}`, chips, communes }];
+        }
       } else {
         this.msgs = [...this.msgs, { role: 'assistant', text: plan.summary || 'C’est fait.', chips }];
       }
@@ -218,6 +228,8 @@ export class AiChat extends LitElement {
       bedrockKey: String(f.get('key') ?? '').trim(),
       bedrockRegion: String(f.get('region') ?? '').trim() || DEFAULT_SETTINGS.bedrockRegion,
       bedrockModel: String(f.get('model') ?? '').trim() || DEFAULT_SETTINGS.bedrockModel,
+      webSearch: f.get('web') === 'on',
+      webModel: String(f.get('webmodel') ?? '').trim() || DEFAULT_SETTINGS.webModel,
     };
     saveSettings(this.settings);
     this.settingsOpen = false;
@@ -266,6 +278,7 @@ export class AiChat extends LitElement {
           ${this.msgs.map((m) => html`
             <div class="msg ${m.role}">
               ${m.role === 'assistant' ? html`<div class="md" @click=${(e: Event) => this.onAnswerClick(e)}>${renderMarkdown(m.text, m.communes)}</div>` : html`<p>${m.text}</p>`}
+              ${m.sources?.length ? html`<div class="sources">Sources : ${m.sources.map((s, i) => html`${i ? ' · ' : ''}<a href=${s.url} target="_blank" rel="noopener noreferrer" title=${s.url}>${s.domain}</a>`)}</div>` : nothing}
               ${m.chips?.length ? html`<div class="chips">${m.chips.map((c) => html`<span>${c}</span>`)}</div>` : nothing}
             </div>`)}
           ${this.busy ? html`<div class="msg assistant busy"><span class="spinner"></span> ${this.busy}
@@ -296,6 +309,8 @@ export class AiChat extends LitElement {
           <label>Région<input name="region" .value=${s.bedrockRegion}></label>
           <label>Modèle<input name="model" .value=${s.bedrockModel}></label>
         </div>
+        <label class="check"><input type="checkbox" name="web" ?checked=${s.webSearch}> Recherche web quand les données ne suffisent pas (actualités, vie locale…)</label>
+        <label>Modèle pour la recherche web (Amazon Nova, régions US)<input name="webmodel" .value=${s.webModel}></label>
         <p class="muted small">La clé reste dans ce navigateur (stockage local), n’est jamais envoyée ailleurs qu’à Amazon Bedrock, et n’apparaît pas dans le lien de partage. Préférez une clé de courte durée, limitée à Bedrock.</p>
         <div class="row end">
           ${s.bedrockKey ? html`<button type="button" class="link" @click=${() => { this.settings = { ...s, bedrockKey: '', provider: 'nano' }; saveSettings(this.settings); }}>Effacer la clé</button>` : nothing}
@@ -346,6 +361,8 @@ export class AiChat extends LitElement {
     .msg.assistant { align-self: flex-start; background: var(--surface-2); }
     .msg.error { align-self: flex-start; background: var(--bad-bg); color: var(--bad); }
     .msg.busy { display: flex; align-items: center; gap: 8px; color: var(--muted); flex-wrap: wrap; }
+    .sources { margin-top: 7px; font-size: 12px; color: var(--muted); }
+    .sources a { color: var(--brand-2); }
     .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
     .chips span { font-size: 11.5px; background: var(--brand-soft); color: var(--brand-2); border-radius: 999px; padding: 2px 8px; }
     .ask { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
@@ -357,7 +374,7 @@ export class AiChat extends LitElement {
     fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
     legend { font-weight: 650; margin-bottom: 4px; }
     .settings label { display: flex; flex-direction: column; gap: 3px; }
-    .settings fieldset label { flex-direction: row; align-items: flex-start; gap: 6px; }
+    .settings fieldset label, .settings label.check { flex-direction: row; align-items: flex-start; gap: 6px; }
     .settings input:not([type=radio]) { font: inherit; padding: 6px 8px; border: 1px solid var(--input-line, var(--line)); border-radius: 8px; background: var(--input-bg, var(--surface)); color: var(--ink); width: 100%; box-sizing: border-box; }
     .row { display: flex; gap: 8px; } .row > * { flex: 1; } .row.end { justify-content: flex-end; align-items: center; } .row.end > * { flex: none; }
     .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--brand-2); animation: spin .9s linear infinite; }

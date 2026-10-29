@@ -43,6 +43,9 @@ for q in qs:
         missing = sorted(got) if got else []
     else:
         missing = [e for e in q["expect"] if not any(alt in got for alt in e.split("|"))]
+    web_ok = bool(plan.get("web_search")) == bool(q.get("web", False))
+    if not web_ok:
+        missing = missing + [f"web_search should be {bool(q.get('web', False))}"]
     good = not missing and plan.get("mode") == q["mode"]
     ok += good
     print(f"{'OK ' if good else 'BAD'} {q['id']:15s} {time.time() - t:4.1f}s mode={plan.get('mode')} "

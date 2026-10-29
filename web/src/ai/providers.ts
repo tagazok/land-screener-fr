@@ -3,7 +3,7 @@
 // - "bedrock": Amazon Bedrock Converse API, called straight from the browser with the
 //   user's own Bedrock API key (kept in this browser's localStorage only).
 
-import { ANSWER_SYSTEM, parsePlan, planSchema, systemPrompt, type Plan } from './plan';
+import { ANSWER_SYSTEM, WEB_SYSTEM, parsePlan, planSchema, systemPrompt, type Plan } from './plan';
 
 export type ProviderId = 'nano' | 'bedrock';
 
@@ -12,12 +12,21 @@ export interface AiSettings {
   bedrockKey: string;
   bedrockRegion: string;
   bedrockModel: string;
+  /** Answer with an Amazon Nova model and Bedrock Web Grounding when the question needs the web. */
+  webSearch: boolean;
+  webModel: string;
 }
 
 const KEY = 'lsfr-ai';
 export const DEFAULT_SETTINGS: AiSettings = {
   provider: 'nano', bedrockKey: '', bedrockRegion: 'us-east-1', bedrockModel: 'us.anthropic.claude-haiku-5-5',
+  webSearch: true, webModel: 'us.amazon.nova-2-lite-v1:0',
 };
+
+export interface WebAnswer {
+  text: string;
+  sources: { url: string; domain: string }[];
+}
 
 export function loadSettings(): AiSettings {
   try {
@@ -57,8 +66,8 @@ async function nanoSession(system: string, onProgress?: (p: number) => void): Pr
 }
 
 // ------------------------------------------------------------------ Bedrock
-async function converse(s: AiSettings, body: object, signal?: AbortSignal): Promise<any> {
-  const url = `https://bedrock-runtime.${s.bedrockRegion}.amazonaws.com/model/${encodeURIComponent(s.bedrockModel)}/converse`;
+async function converse(s: AiSettings, body: object, signal?: AbortSignal, model = s.bedrockModel): Promise<any> {
+  const url = `https://bedrock-runtime.${s.bedrockRegion}.amazonaws.com/model/${encodeURIComponent(model)}/converse`;
   const r = await fetch(url, {
     method: 'POST', signal,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${s.bedrockKey}` },
@@ -77,6 +86,30 @@ export interface Assistant {
   plan(question: string, signal?: AbortSignal): Promise<Plan>;
   /** Write a short answer from the question and the facts of the top communes. */
   answer(question: string, facts: string, signal?: AbortSignal): Promise<string>;
+  /** Same, searching the web (Bedrock + Amazon Nova Web Grounding only); null when unavailable. */
+  webAnswer: ((question: string, facts: string, signal?: AbortSignal) => Promise<WebAnswer>) | null;
+}
+
+/** Bedrock Web Grounding: Nova runs the searches itself and returns citations next to the text. */
+async function novaWeb(s: AiSettings, question: string, facts: string, signal?: AbortSignal): Promise<WebAnswer> {
+  const res = await converse(s, {
+    system: [{ text: WEB_SYSTEM }],
+    messages: [{ role: 'user', content: [{ text: `Demande : ${question}\n\nDonnées de l'application :\n${facts}` }] }],
+    inferenceConfig: { maxTokens: 1500 },
+    toolConfig: { tools: [{ systemTool: { name: 'nova_grounding' } }] },
+  }, signal, s.webModel);
+  const content: any[] = res.output?.message?.content ?? [];
+  const sources = new Map<string, string>();
+  for (const c of content) {
+    for (const cit of c.citationsContent?.citations ?? []) {
+      const w = cit.location?.web;
+      if (typeof w?.url === 'string' && /^https:\/\//.test(w.url)) sources.set(w.url, w.domain ?? new URL(w.url).hostname);
+    }
+  }
+  return {
+    text: content.map((c) => c.text ?? '').join('').trim(),
+    sources: [...sources].map(([url, domain]) => ({ url, domain })),
+  };
 }
 
 export function assistant(s: AiSettings, onProgress?: (p: number) => void): Assistant {
@@ -118,6 +151,7 @@ export function assistant(s: AiSettings, onProgress?: (p: number) => void): Assi
         // Reasoning models also return a reasoningContent block: keep only the text.
         return res.output?.message?.content?.map((c: any) => c.text ?? '').join('').trim() ?? '';
       },
+      webAnswer: s.webSearch ? (question, facts, signal) => novaWeb(s, question, facts, signal) : null,
     };
   }
   return {
@@ -139,6 +173,8 @@ export function assistant(s: AiSettings, onProgress?: (p: number) => void): Assi
         session.destroy();
       }
     },
+    // Gemini Nano has no web access; web questions fall back to the data-only answer.
+    webAnswer: null,
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

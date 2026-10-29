@@ -6,6 +6,8 @@ export interface EvalQuestion {
   text: string;
   mode: 'answer' | 'action';
   expect: string[];
+  /** Expected web_search routing (default false). */
+  web?: boolean;
 }
 
 export const QUESTIONS: EvalQuestion[] = [
@@ -22,6 +24,9 @@ export const QUESTIONS: EvalQuestion[] = [
     id: 'followup', mode: 'answer', expect: ['none'],
     text: 'Échange précédent :\nUtilisateur : Je cherche une ville du Nord avec un bon rendement\nAssistant : Roubaix correspond à votre recherche, avec un rendement brut de 7 %, mais un risque est identifié.\n\nNouvelle demande : quel est ce risque ?',
   },
+  { id: 'web-projects', mode: 'answer', expect: ['none'], web: true, text: 'Y a-t-il des projets d’aménagement ou de construction en cours à Gérardmer ?' },
+  { id: 'web-life', mode: 'answer', expect: ['none'], web: true, text: 'Comment est la vie associative et culturelle à Remiremont ?' },
+  { id: 'data-risk', mode: 'answer', expect: ['none'], web: false, text: 'Quels sont les risques naturels à Gérardmer ?' },
   { id: 'tiers-best', mode: 'action', text: 'Garde seulement les communes des groupes A et B', expect: ['tiers:AB'] },
   { id: 'tiers-below', mode: 'action', text: 'Seulement celles avec un score inférieur à C', expect: ['tiers:DE'] },
   {
