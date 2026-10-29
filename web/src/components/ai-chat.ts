@@ -1,4 +1,4 @@
-import { LitElement, css, html, nothing } from 'lit';
+import { LitElement, css, html, nothing, svg } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import DOMPurify from 'dompurify';
@@ -11,13 +11,22 @@ import {
 /** What the chat needs from the app: apply a plan, then describe the communes it now shows. */
 export interface ChatHost {
   applyPlan(plan: Plan): { applied: string[]; dropped: string[] };
-  facts(context: string): { count: number; text: string };
+  facts(context: string): { count: number; text: string; communes: Commune[] };
+  /** Open a commune's side panel and fly the map to it. */
+  openCommune(code: string): void;
+}
+
+export interface Commune {
+  code: string;
+  nom: string;
 }
 
 interface Msg {
   role: 'user' | 'assistant' | 'error';
   text: string;
   chips?: string[];
+  /** Communes the model was told about: their names in the answer become links. */
+  communes?: Commune[];
 }
 
 const EXAMPLES = [
@@ -30,7 +39,7 @@ const EXAMPLES = [
  * Model output is untrusted: Markdown -> HTML, then sanitized. Only formatting tags survive
  * (no scripts, styles, images, iframes or forms); links open in a new tab.
  */
-function renderMarkdown(text: string) {
+function renderMarkdown(text: string, communes: Commune[] = []) {
   const raw = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
   const clean = DOMPurify.sanitize(raw, {
     ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'b', 'i', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
@@ -41,8 +50,49 @@ function renderMarkdown(text: string) {
   const box = document.createElement('div');
   box.innerHTML = clean;
   box.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+  linkCommunes(box, communes);
   // h1/h2 are not in the allowed list: their text is kept as plain paragraphs, too big for a chat bubble otherwise.
   return unsafeHTML(box.innerHTML);
+}
+
+/**
+ * Turn each name of a commune the model was given into a link that opens its panel. Works on
+ * text nodes of the already-sanitized answer, so no model text ever becomes markup. Longest
+ * names first, so "Saint-Martin-de-Ré" is not split by "Saint-Martin".
+ */
+function linkCommunes(root: HTMLElement, communes: Commune[]) {
+  if (!communes.length) return;
+  const byName = new Map<string, string>();
+  for (const c of communes) if (c.nom.length >= 3 && !byName.has(c.nom)) byName.set(c.nom, c.code);
+  const names = [...byName.keys()].sort((a, b) => b.length - a.length);
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?<![\\p{L}\\p{N}-])(${names.map(esc).join('|')})(?![\\p{L}\\p{N}-])`, 'gu');
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!(n.parentElement?.closest('a, code, pre'))) nodes.push(n as Text);
+  }
+  for (const node of nodes) {
+    const s = node.data;
+    re.lastIndex = 0;
+    if (!re.test(s)) continue;
+    re.lastIndex = 0;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const m of s.matchAll(re)) {
+      frag.append(s.slice(last, m.index));
+      const a = document.createElement('a');
+      a.className = 'commune';
+      a.href = '#';
+      a.dataset.code = byName.get(m[1])!;
+      a.title = 'Ouvrir la fiche de la commune';
+      a.textContent = m[1];
+      frag.append(a);
+      last = m.index! + m[1].length;
+    }
+    frag.append(s.slice(last));
+    node.replaceWith(frag);
+  }
 }
 
 @customElement('ai-chat')
@@ -56,11 +106,57 @@ export class AiChat extends LitElement {
   @state() private progress: number | null = null;
   @state() private msgs: Msg[] = [];
   @state() private draft = '';
+  /** Docked as a full-height panel on the left of the page (remembered in this browser). */
+  @property({ type: Boolean, reflect: true }) docked = false;
+  @state() private width = 380;
   private abort?: AbortController;
 
   connectedCallback() {
     super.connectedCallback();
     nanoAvailability().then((s) => (this.nano = s));
+    try {
+      const d = JSON.parse(localStorage.getItem('lsfr-chat-dock') ?? '{}');
+      if (typeof d.width === 'number') this.width = d.width;
+      if (d.docked) { this.open = true; this.setDocked(true); }
+    } catch { /* ignore */ }
+  }
+
+  private onAnswerClick(e: Event) {
+    const a = (e.target as HTMLElement).closest('a.commune') as HTMLElement | null;
+    if (!a?.dataset.code) return;
+    e.preventDefault();
+    this.host.openCommune(a.dataset.code);
+  }
+
+  /** Tell the app how much room the docked panel takes, so the page moves right. */
+  private emitDock() {
+    this.dispatchEvent(new CustomEvent('chat-dock', { detail: { width: this.open && this.docked ? this.width : 0 }, bubbles: true, composed: true }));
+    localStorage.setItem('lsfr-chat-dock', JSON.stringify({ docked: this.docked, width: this.width }));
+  }
+
+  private setDocked(on: boolean) {
+    this.docked = on;
+    this.style.setProperty('--chat-w', `${this.width}px`);
+    this.emitDock();
+  }
+
+  private setOpen(on: boolean) {
+    this.open = on;
+    this.emitDock();
+  }
+
+  private startResize(e: PointerEvent) {
+    e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      this.width = Math.round(Math.min(Math.max(ev.clientX, 300), Math.min(900, window.innerWidth - 420)));
+      this.style.setProperty('--chat-w', `${this.width}px`);
+      this.emitDock();
+    };
+    const up = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
   }
 
   private get ready(): boolean {
@@ -84,10 +180,10 @@ export class AiChat extends LitElement {
       if (plan.mode === 'answer') {
         this.busy = 'Je rédige la réponse…';
         const prev = this.history();
-        const { count, text: facts } = this.host.facts(`${text} ${prev}`);
+        const { count, text: facts, communes } = this.host.facts(`${text} ${prev}`);
         const question = prev ? `Échange précédent :\n${prev}\n\nNouvelle question : ${text}` : text;
         const answer = count ? await a.answer(question, facts, this.abort.signal) : 'Aucune commune ne passe tous ces critères. Retirez un filtre (bouton × sur les étiquettes en haut) pour élargir la recherche.';
-        this.msgs = [...this.msgs, { role: 'assistant', text: `${answer}\n\n${count} communes retenues.`, chips }];
+        this.msgs = [...this.msgs, { role: 'assistant', text: `${answer}\n\n${count} communes retenues.`, chips, communes }];
       } else {
         this.msgs = [...this.msgs, { role: 'assistant', text: plan.summary || 'C’est fait.', chips }];
       }
@@ -132,7 +228,7 @@ export class AiChat extends LitElement {
 
   render() {
     if (!this.open) {
-      return html`<button class="fab" @click=${() => (this.open = true)} aria-label="Ouvrir l’assistant">✦ Assistant</button>`;
+      return html`<button class="fab" @click=${() => this.setOpen(true)} aria-label="Ouvrir l’assistant">✦ Assistant</button>`;
     }
     const s = this.settings;
     return html`
@@ -141,9 +237,18 @@ export class AiChat extends LitElement {
           <b>✦ Assistant</b>
           <small>${s.provider === 'bedrock' ? `Bedrock · ${s.bedrockModel.replace(/^us\./, '')}` : 'Gemini Nano (local)'}</small>
           <span class="grow"></span>
+          <button class="icon dock" title=${this.docked ? 'Détacher (fenêtre flottante)' : 'Ancrer à gauche de la page'}
+            aria-pressed=${this.docked ? 'true' : 'false'} aria-label=${this.docked ? 'Détacher l’assistant' : 'Ancrer l’assistant à gauche'}
+            @click=${() => this.setDocked(!this.docked)}>
+            <svg viewBox="0 0 20 20" aria-hidden="true">${this.docked
+              ? svg`<rect x="3" y="4" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="9" width="6" height="5" rx="1" fill="currentColor"/>`
+              : svg`<rect x="3" y="4" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4" y="5" width="5" height="10" fill="currentColor"/>`}</svg>
+          </button>
           <button class="icon" title="Réglages" aria-label="Réglages de l’assistant" @click=${() => (this.settingsOpen = !this.settingsOpen)}>⚙</button>
-          <button class="icon" title="Fermer" aria-label="Fermer l’assistant" @click=${() => (this.open = false)}>×</button>
+          <button class="icon" title="Fermer" aria-label="Fermer l’assistant" @click=${() => this.setOpen(false)}>×</button>
         </header>
+        ${this.docked ? html`<div class="resize" role="separator" aria-orientation="vertical" aria-label="Redimensionner l’assistant"
+          title="Glisser pour changer la largeur" @pointerdown=${(e: PointerEvent) => this.startResize(e)}></div>` : nothing}
         ${this.settingsOpen ? this.renderSettings() : nothing}
         <div class="log" aria-live="polite">
           ${this.msgs.length ? nothing : html`
@@ -152,7 +257,7 @@ export class AiChat extends LitElement {
             ${EXAMPLES.map((e) => html`<button class="ex" @click=${() => this.send(e)} ?disabled=${!this.ready}>${e}</button>`)}`}
           ${this.msgs.map((m) => html`
             <div class="msg ${m.role}">
-              ${m.role === 'assistant' ? html`<div class="md">${renderMarkdown(m.text)}</div>` : html`<p>${m.text}</p>`}
+              ${m.role === 'assistant' ? html`<div class="md" @click=${(e: Event) => this.onAnswerClick(e)}>${renderMarkdown(m.text, m.communes)}</div>` : html`<p>${m.text}</p>`}
               ${m.chips?.length ? html`<div class="chips">${m.chips.map((c) => html`<span>${c}</span>`)}</div>` : nothing}
             </div>`)}
           ${this.busy ? html`<div class="msg assistant busy"><span class="spinner"></span> ${this.busy}
@@ -193,6 +298,13 @@ export class AiChat extends LitElement {
 
   static styles = css`
     :host { position: fixed; left: 18px; bottom: 18px; z-index: 55; font: inherit; color: var(--ink); }
+    :host([docked]) { left: 0; top: var(--header-h, 56px); bottom: 0; width: var(--chat-w, 380px); z-index: 27; }
+    :host([docked]) .panel { width: 100%; height: 100%; border-radius: 0; border-width: 0 1px 0 0; box-shadow: 8px 0 24px rgba(16,32,24,.06); position: relative; }
+    .resize { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 2; touch-action: none; }
+    .resize:hover, .resize:active { background: linear-gradient(90deg, transparent 3px, var(--brand-2) 3px, var(--brand-2) 5px, transparent 5px); }
+    .icon svg { width: 17px; height: 17px; vertical-align: -3px; }
+    .icon[aria-pressed='true'] { color: var(--brand-2); }
+    @media (max-width: 900px) { .dock { display: none; } :host([docked]) { width: 100vw; } }
     .fab { border: 0; border-radius: 999px; padding: 11px 18px; font: inherit; font-weight: 650; cursor: pointer;
       background: var(--brand); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.22); }
     .panel { width: min(420px, calc(100vw - 36px)); height: min(620px, calc(100vh - 110px)); display: flex; flex-direction: column;
@@ -220,6 +332,8 @@ export class AiChat extends LitElement {
     .md code { font-size: 12px; background: var(--surface); padding: 1px 4px; border-radius: 4px; }
     .md blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
     .md a { color: var(--brand-2); }
+    .md a.commune { font-weight: 600; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; cursor: pointer; }
+    .md a.commune:hover { text-decoration-style: solid; }
     .msg.user { align-self: flex-end; background: var(--brand); color: #fff; }
     .msg.assistant { align-self: flex-start; background: var(--surface-2); }
     .msg.error { align-self: flex-start; background: var(--bad-bg); color: var(--bad); }

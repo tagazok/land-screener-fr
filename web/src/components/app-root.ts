@@ -338,10 +338,25 @@ export class AppRoot extends LitElement {
     this.pushUrl();
   }
 
-  /** Bridge for the assistant: it only ever goes through these two functions. */
+  /** Width of the assistant docked on the left (0 = floating or closed); the page shifts right by it. */
+  @state() private chatWidth = 0;
+
+  private setChatWidth(w: number) {
+    this.chatWidth = w;
+    this.style.setProperty('--chat-w', `${w}px`);
+    // The map's canvas must follow the new size.
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+  }
+
+  /** Bridge for the assistant: it only ever goes through these functions. */
   private chatHost: ChatHost = {
     applyPlan: (plan: Plan) => this.applyPlan(plan),
     facts: (context: string) => this.chatFacts(context),
+    openCommune: (code: string) => {
+      // A commune outside the chosen départements has no panel: widen to all of France first.
+      if (!this.results.some((r) => r.row.code === code)) this.setScopes([]);
+      this.select(code, true);
+    },
   };
 
   private applyPlan(plan: Plan): { applied: string[]; dropped: string[] } {
@@ -396,7 +411,7 @@ export class AppRoot extends LitElement {
    * Facts for the model: the best communes now shown, plus any commune named in the conversation
    * (so a follow-up like "what is Roubaix's risk?" gets Roubaix's data), with the values the user filtered on.
    */
-  private chatFacts(context = ''): { count: number; text: string } {
+  private chatFacts(context = ''): { count: number; text: string; communes: { code: string; nom: string }[] } {
     const passing = this.results.filter((r) => r.pass).sort(compareScore);
     const cols = [...new Set([...this.custom.map((f) => f.column), 'pop', 'town3000_name', 'town3000_km', 'price_m2', 'risk_count', 'risk_list'])]
       .filter((c) => c in COLUMNS).slice(0, 14);
@@ -413,7 +428,9 @@ export class AppRoot extends LitElement {
       'median_income', 'apl_gp', 'crime_burglary', 'pop_cagr_11y'];
     const parts = [`${passing.length} communes retenues par les critères actuels. Les meilleures :`, ...passing.slice(0, 8).map((r) => line(r.row))];
     if (named.length) parts.push('', 'Communes citées dans la conversation (détail) :', ...named.map((r) => line(r, detail)));
-    return { count: passing.length + named.length, text: parts.join('\n') };
+    // Names the answer may cite: the communes listed for the model, plus the next best ones it may mention.
+    const communes = [...passing.slice(0, 40).map((r) => r.row), ...named].map((r) => ({ code: r.code, nom: r.nom }));
+    return { count: passing.length + named.length, text: parts.join('\n'), communes };
   }
 
   private updateSignal(id: string, weight: number) {
@@ -595,7 +612,7 @@ export class AppRoot extends LitElement {
         </div>
       </header>
 
-      <div class="layout ${sel ? 'has-detail' : ''}">
+      <div class="layout ${sel ? 'has-detail' : ''} ${this.chatWidth ? 'chat-docked' : ''}">
         <main>
           <section class="summary" aria-label="Réglages actifs">
             <div class="summary-text">
@@ -645,7 +662,7 @@ export class AppRoot extends LitElement {
       </div>
 
       ${this.settingsOpen ? this.renderSettings(results, st.label) : nothing}
-      ${this.raw.length ? html`<ai-chat .host=${this.chatHost}></ai-chat>` : nothing}
+      ${this.raw.length ? html`<ai-chat .host=${this.chatHost} @chat-dock=${(e: CustomEvent<{ width: number }>) => this.setChatWidth(e.detail.width)}></ai-chat>` : nothing}
       ${this.loadingMb !== null ? html`
         <div class="loading" role="status" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>
@@ -1218,6 +1235,9 @@ export class AppRoot extends LitElement {
     /* ---- layout ---- */
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); }
     .layout.has-detail { grid-template-columns: minmax(0, 1fr) 400px; }
+    /* Docked assistant: the page (and the expanded map) start right of it. */
+    .layout.chat-docked { margin-left: var(--chat-w, 0px); }
+    .layout.chat-docked .mapcard.full { left: var(--chat-w, 0px); }
     main { padding: 18px 22px 30px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
     /* ---- summary of active settings ---- */
