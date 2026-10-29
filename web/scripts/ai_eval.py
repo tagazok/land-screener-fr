@@ -17,15 +17,23 @@ client = boto3.client("bedrock-runtime", region_name="us-east-1")
 ok = 0
 for q in qs:
     t = time.time()
-    r = client.converse(
-        modelId=MODEL,
-        system=[{"text": q["bedrock"]["system"]}],
-        messages=[{"role": "user", "content": [{"text": q["text"]}]}],
-        inferenceConfig={"maxTokens": 1500},
-        toolConfig={"tools": [{"toolSpec": {"name": "apply_plan", "description": "Applique les critères.",
-                                            "inputSchema": {"json": q["bedrock"]["schema"]}}}],
-                    "toolChoice": {"tool": {"name": "apply_plan"}}},
-    )
+    def call(choice):
+        return client.converse(
+            modelId=MODEL,
+            system=[{"text": q["bedrock"]["system"] + "\nRéponds toujours en appelant l'outil apply_plan."}],
+            messages=[{"role": "user", "content": [{"text": q["text"]}]}],
+            inferenceConfig={"maxTokens": 4000},
+            toolConfig={"tools": [{"toolSpec": {"name": "apply_plan", "description": "Applique les critères.",
+                                                "inputSchema": {"json": q["bedrock"]["schema"]}}}],
+                        "toolChoice": choice},
+        )
+
+    try:  # same fallback as the app: models that reason first refuse a forced tool
+        r = call({"tool": {"name": "apply_plan"}})
+    except client.exceptions.ValidationException as e:
+        if "tool_choice" not in str(e):
+            raise
+        r = call({"auto": {}})
     use = next(c["toolUse"] for c in r["output"]["message"]["content"] if "toolUse" in c)
     plan = use["input"]
     got = {f"{f['column']}:{f['op']}" for f in plan.get("filters", [])}

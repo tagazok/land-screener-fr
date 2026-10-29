@@ -84,26 +84,39 @@ export function assistant(s: AiSettings, onProgress?: (p: number) => void): Assi
     return {
       async plan(question, signal) {
         const { text, columns } = systemPrompt(question, true);
-        const res = await converse(s, {
-          system: [{ text }],
+        const call = (toolChoice: object) => converse(s, {
+          system: [{ text: `${text}\nRéponds toujours en appelant l'outil apply_plan.` }],
           messages: [{ role: 'user', content: [{ text: question }] }],
-          inferenceConfig: { maxTokens: 1500 },
+          inferenceConfig: { maxTokens: 4000 },
           toolConfig: {
             tools: [{ toolSpec: { name: 'apply_plan', description: 'Applique les critères à la carte et à la liste des communes.', inputSchema: { json: planSchema(columns) } } }],
-            toolChoice: { tool: { name: 'apply_plan' } },
+            toolChoice,
           },
         }, signal);
-        const use = res.output?.message?.content?.find((c: any) => c.toolUse)?.toolUse;
-        if (!use) throw new Error('Bedrock n’a pas renvoyé de critères');
-        return parsePlan(JSON.stringify(use.input));
+        // Forcing the tool is the most reliable, but models that reason first (e.g. Sonnet 5.5)
+        // refuse it: fall back to letting the model choose, with the instruction above.
+        let res;
+        try {
+          res = await call({ tool: { name: 'apply_plan' } });
+        } catch (e) {
+          if (!/tool_choice/.test((e as Error).message)) throw e;
+          res = await call({ auto: {} });
+        }
+        const content = res.output?.message?.content ?? [];
+        const use = content.find((c: any) => c.toolUse)?.toolUse;
+        if (use) return parsePlan(JSON.stringify(use.input));
+        const txt = content.map((c: any) => c.text ?? '').join('');
+        if (/\{[\s\S]*\}/.test(txt)) return parsePlan(txt);
+        throw new Error('Bedrock n’a pas renvoyé de critères');
       },
       async answer(question, facts, signal) {
         const res = await converse(s, {
           system: [{ text: ANSWER_SYSTEM }],
           messages: [{ role: 'user', content: [{ text: `Demande : ${question}\n\nCommunes retenues (les meilleures d'abord) :\n${facts}` }] }],
-          inferenceConfig: { maxTokens: 800 },
+          inferenceConfig: { maxTokens: 3000 },
         }, signal);
-        return res.output?.message?.content?.map((c: any) => c.text ?? '').join('') ?? '';
+        // Reasoning models also return a reasoningContent block: keep only the text.
+        return res.output?.message?.content?.map((c: any) => c.text ?? '').join('').trim() ?? '';
       },
     };
   }
