@@ -1,5 +1,5 @@
 {
- "built": "2026-10-19",
+ "built": "2026-10-29",
  "scope": {
   "label": "France métropolitaine",
   "departements": 96,
@@ -236,6 +236,22 @@
    "licence": "Licence Ouverte 2.0",
    "vintage": "rentrée 2025",
    "url": "https://data.enseignementsup-recherche.gouv.fr/",
+   "credit": null
+  },
+  {
+   "key": "tapwater",
+   "producer": "Ministère de la Santé – contrôle sanitaire de l’eau distribuée, résultats par paramètre (pesticides, PFAS)",
+   "licence": "Licence Ouverte 2.0",
+   "vintage": "analyses 2025",
+   "url": "https://static.data.gouv.fr/resources/resultats-du-controle-sanitaire-de-leau-distribuee-commune-par-commune/20260710-140314/dis-2025-dept.zip",
+   "credit": null
+  },
+  {
+   "key": "soil",
+   "producer": "Géorisques / BRGM – CASIAS, sites et sols pollués (ex-BASOL), secteurs d’information sur les sols (SIS)",
+   "licence": "Licence Ouverte 2.0",
+   "vintage": "extraction 2026-10",
+   "url": "https://www.georisques.gouv.fr/donnees/bases-de-donnees",
    "credit": null
   }
  ],
@@ -480,6 +496,42 @@
    "unit": "ratio",
    "label": "Share of 2025 samples breaking a quality reference"
   },
+  "pesticide_samples": {
+   "unit": "count",
+   "label": "2025 tap-water samples analysed for pesticides"
+  },
+  "pesticide_breach_share": {
+   "unit": "ratio",
+   "label": "Share of those samples with a pesticide or metabolite over its limit"
+  },
+  "pfas_samples": {
+   "unit": "count",
+   "label": "2025 tap-water samples analysed for the sum of 20 PFAS"
+  },
+  "pfas_max": {
+   "unit": "µg/L",
+   "label": "Highest sum of 20 PFAS measured in 2025 (limit 0.1 µg/L)"
+  },
+  "pfas_breach_share": {
+   "unit": "ratio",
+   "label": "Share of PFAS samples over 0.1 µg/L"
+  },
+  "casias_count": {
+   "unit": "count",
+   "label": "CASIAS former industrial / service sites (Géorisques)"
+  },
+  "casias_per_km2": {
+   "unit": "sites/km²",
+   "label": "CASIAS sites per km²"
+  },
+  "polluted_site_count": {
+   "unit": "count",
+   "label": "Sites with known soil pollution under State action (ex-BASOL)"
+  },
+  "sis_count": {
+   "unit": "count",
+   "label": "Secteurs d'information sur les sols (SIS)"
+  },
   "gp_count": {
    "unit": "count",
    "label": "GPs in the commune (BPE 2025)"
@@ -670,6 +722,15 @@
   "aav_size": 0.993,
   "water_limit_breach_share": 0.991,
   "water_reference_breach_share": 0.991,
+  "pesticide_samples": 0.991,
+  "pesticide_breach_share": 0.936,
+  "pfas_samples": 0.991,
+  "pfas_max": 0.795,
+  "pfas_breach_share": 0.795,
+  "casias_count": 1.0,
+  "casias_per_km2": 0.993,
+  "polluted_site_count": 1.0,
+  "sis_count": 1.0,
   "gp_count": 1.0,
   "tfpb_total_avg_eur": 0.99,
   "tenant_share": 0.993,
@@ -904,6 +965,40 @@
   "students": {
    "matched": 1474,
    "unmatched": []
+  },
+  "tapwater": {
+   "matched": 34424,
+   "unmatched": [
+    "12076",
+    "14011",
+    "49069",
+    "69159"
+   ]
+  },
+  "soil": {
+   "matched": 26854,
+   "unmatched": [
+    "06908",
+    "06959",
+    "11910",
+    "12076",
+    "12901",
+    "14011",
+    "14513",
+    "14624",
+    "18901",
+    "29933",
+    "29934",
+    "30937",
+    "30938",
+    "33934",
+    "35905",
+    "38902",
+    "42902",
+    "44060",
+    "49069",
+    "49144"
+   ]
   }
  }
 }

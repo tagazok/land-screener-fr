@@ -8,7 +8,7 @@ export type PropertyType = 'house' | 'apt';
 
 export interface ColumnInfo {
   label: string;
-  unit: 'eur' | 'eur_m2' | 'eur_m2_month' | 'pct' | 'pct_raw' | 'count' | 'days' | 'bool' | 'text' | 'num' | 'density' | 'km';
+  unit: 'eur' | 'eur_m2' | 'eur_m2_month' | 'pct' | 'pct_raw' | 'count' | 'days' | 'bool' | 'text' | 'num' | 'density' | 'km' | 'ugl';
   /** What the value means. */
   def?: string;
   /** How it is calculated, and from which source. */
@@ -170,6 +170,51 @@ export const COLUMNS: Record<string, ColumnInfo> = {
     label: 'Eau du robinet non conforme', unit: 'pct',
     def: 'Part des analyses d’eau du robinet de 2025 qui dépassaient une limite de qualité sanitaire (bactéries, nitrates, pesticides…), sur les réseaux qui alimentent la commune. 0 % est la norme ; quelques pour cent signalent un problème récurrent.',
     calc: 'contrôle sanitaire des Agences régionales de santé (Ministère de la Santé). Analyses dépassant une limite ÷ nombre d’analyses, tous réseaux de la commune confondus. Un dépassement ponctuel n’interdit pas toujours de boire l’eau ; l’ARS informe alors la mairie et les habitants.',
+  },
+  pesticide_breach_share: {
+    label: 'Eau : pesticides hors limite', unit: 'pct',
+    def: 'Part des analyses de pesticides de l’eau du robinet en 2025 où au moins un pesticide ou un de ses produits de dégradation (métabolites) dépassait sa limite de qualité, sur les réseaux qui alimentent la commune. 0 % est la norme.',
+    calc: 'contrôle sanitaire des ARS (Ministère de la Santé). Une analyse est hors limite si une substance dépasse 0,1 µg/L (0,03 µg/L pour aldrine, dieldrine, heptachlore et son époxyde) ou si le total des pesticides dépasse 0,5 µg/L. Nombre d’analyses hors limite ÷ nombre d’analyses de pesticides. Les métabolites les plus souvent en cause sont ceux de la chloridazone et du chlorothalonil. C’est l’eau distribuée, après traitement : un puits ou un forage privé peut être bien plus contaminé.',
+  },
+  pesticide_samples: {
+    label: 'Eau : analyses pesticides', unit: 'count',
+    def: 'Nombre d’analyses de pesticides en 2025 sur les réseaux qui alimentent la commune. Avec peu d’analyses, la part hors limite est moins fiable.',
+    calc: 'contrôle sanitaire des ARS, analyses 2025 comportant au moins un pesticide.',
+  },
+  pfas_max: {
+    label: 'Eau : PFAS max mesuré', unit: 'ugl',
+    def: 'Plus forte concentration de PFAS (« polluants éternels ») mesurée dans l’eau du robinet en 2025, sur les réseaux qui alimentent la commune. La limite de qualité est de 0,1 µg/L pour la somme de 20 PFAS.',
+    calc: 'paramètre « somme de 20 PFAS » du contrôle sanitaire des ARS ; maximum des analyses 2025. Le contrôle des PFAS ne devient obligatoire partout qu’en 2026 : en 2025, beaucoup de réseaux n’ont pas encore été analysés, et une valeur vide veut dire « pas d’analyse », pas « eau sans PFAS ».',
+  },
+  pfas_breach_share: {
+    label: 'Eau : PFAS hors limite', unit: 'pct',
+    def: 'Part des analyses PFAS de 2025 au-dessus de 0,1 µg/L (somme de 20 PFAS).',
+    calc: 'analyses au-dessus de 0,1 µg/L ÷ analyses PFAS, tous réseaux de la commune. Vide si aucune analyse PFAS.',
+  },
+  pfas_samples: {
+    label: 'Eau : analyses PFAS', unit: 'count',
+    def: 'Nombre d’analyses PFAS en 2025 sur les réseaux qui alimentent la commune.',
+    calc: 'contrôle sanitaire des ARS, paramètre « somme de 20 PFAS ».',
+  },
+  sis_count: {
+    label: 'Sols pollués : secteurs SIS', unit: 'count',
+    def: 'Nombre de secteurs d’information sur les sols (SIS) dans la commune : des terrains où l’État sait qu’il y a une pollution et impose une étude de sol avant de construire ou de changer d’usage. Le vendeur ou le bailleur doit en informer l’acheteur.',
+    calc: 'Géorisques (BRGM), couche SIS, comptée par code commune. La position exacte de chaque secteur est sur georisques.gouv.fr.',
+  },
+  polluted_site_count: {
+    label: 'Sols pollués : sites suivis', unit: 'count',
+    def: 'Nombre de sites où une pollution des sols est connue et suivie par l’État (ancienne base BASOL) : diagnostic, travaux de dépollution ou surveillance.',
+    calc: 'Géorisques (BRGM), « sites et sols pollués » en instruction ou traités, comptés par code commune. Un même site peut aussi être un SIS.',
+  },
+  casias_count: {
+    label: 'Anciens sites industriels (CASIAS)', unit: 'count',
+    def: 'Nombre d’anciens sites industriels et d’activités de service recensés dans la commune (garages, stations-service, pressings, décharges, usines…). Une activité potentiellement polluante y a eu lieu ; cela ne prouve pas que le sol est pollué aujourd’hui.',
+    calc: 'Géorisques (BRGM), carte CASIAS, comptée par code commune. Les grandes villes en ont mécaniquement beaucoup : comparez plutôt la densité par km².',
+  },
+  casias_per_km2: {
+    label: 'Anciens sites industriels /km²', unit: 'num',
+    def: 'Nombre d’anciens sites industriels et d’activités de service (CASIAS) par km² de commune. Un signal de vigilance pour un potager ou des poules : près d’anciennes activités, le sol peut contenir des métaux (plomb, cadmium…) ou des hydrocarbures.',
+    calc: 'sites CASIAS ÷ surface de la commune (population ÷ densité INSEE). Seule une analyse de sol sur votre terrain dit s’il est pollué.',
   },
   clay_high_share: {
     label: 'Argile : exposition forte', unit: 'pct',
@@ -419,6 +464,15 @@ const f = (id: string, column: string, op: FilterDef['op'], value?: number, enab
 });
 const s = (id: string, column: string, dir: 1 | -1, weight: number): SignalDef => ({ id, column, dir, weight });
 
+/** Tap-water and soil contamination filters (off by default: presets and AI summaries unchanged). */
+const CONTAMINATION_FILTERS = () => [
+  f('pesticides', 'pesticide_breach_share', 'max', 0, false),
+  f('pfas', 'pfas_max', 'max', 0.1, false),
+  f('sis', 'sis_count', 'max', 0, false),
+  f('polluted', 'polluted_site_count', 'max', 0, false),
+  f('casias', 'casias_per_km2', 'max', 1, false),
+];
+
 export const STRATEGIES: Strategy[] = [
   {
     id: 'long',
@@ -567,7 +621,7 @@ export const STRATEGIES: Strategy[] = [
 for (const st of STRATEGIES) {
   const rest = st.filters.filter((x) => x.id !== 'pop');
   const min = st.filters.find((x) => x.id === 'pop') ?? f('pop', 'pop', 'min', 1000, false);
-  st.filters = [min, f('popmax', 'pop', 'max', 20000, false), ...rest];
+  st.filters = [min, f('popmax', 'pop', 'max', 20000, false), ...rest, ...CONTAMINATION_FILTERS()];
 }
 
 export const FILTERS: Record<string, { label: string; help: string }> = {
@@ -679,6 +733,26 @@ export const FILTERS: Record<string, { label: string; help: string }> = {
     label: 'IPS du collège minimum',
     help: 'Élimine les communes dont le collège public (ou le plus proche) a un indice de position sociale sous ce seuil. 100 ≈ moyenne nationale.',
   },
+  pesticides: {
+    label: 'Eau : pesticides hors limite max. (%)',
+    help: 'Élimine les communes où plus de ce pourcentage des analyses de pesticides de l’eau du robinet (2025) dépassait une limite de qualité. Avec 0 %, on exclut toute commune ayant eu au moins un dépassement.',
+  },
+  pfas: {
+    label: 'Eau : PFAS max. (µg/L)',
+    help: 'Élimine les communes où l’eau du robinet a dépassé cette concentration de PFAS (somme de 20 PFAS) au moins une fois en 2025. 0,1 µg/L est la limite de qualité ; une valeur plus basse est plus exigeante.',
+  },
+  sis: {
+    label: 'Secteurs de sols pollués (SIS) max.',
+    help: 'Élimine les communes qui ont plus que ce nombre de secteurs d’information sur les sols, c’est-à-dire de terrains où une pollution est connue de l’État. Avec 0 : aucune commune ayant un tel terrain.',
+  },
+  polluted: {
+    label: 'Sites de sols pollués suivis max.',
+    help: 'Élimine les communes ayant plus que ce nombre de sites dont la pollution des sols est connue et suivie par l’État (ancienne base BASOL). Avec 0 : aucune commune ayant un tel site.',
+  },
+  casias: {
+    label: 'Anciens sites industriels max. /km²',
+    help: 'Élimine les communes ayant plus que ce nombre d’anciens sites industriels ou d’activités de service (CASIAS) par km². Utile pour un potager ou des poules dans un secteur peu industrialisé ; cela ne dit rien de votre terrain précis.',
+  },
   fibre: {
     label: 'Fibre minimum (% des logements)',
     help: 'Élimine les communes où moins de ce pourcentage de logements a accès à la fibre. Utile pour le télétravail.',
@@ -730,6 +804,7 @@ export const DETAIL_GROUPS: { title: string; help?: string; columns: string[] }[
   { title: 'Sécurité', help: 'Faits enregistrés par la police et la gendarmerie en 2025. Une commune touristique ou un pôle commercial a mécaniquement plus de faits par habitant (visiteurs non comptés dans la population).', columns: ['crime_burglary', 'crime_violence', 'crime_damage', 'crime_theft', 'crime_estimated'] },
   { title: 'Écoles', columns: ['college_ips', 'college_ips_km', 'lycee_success', 'lycee_value_added', 'lycee_success_km'] },
   { title: 'Eau', columns: ['drinking_water_days_avg', 'drought_days_avg', 'crisis_days_avg', 'water_limit_breach_share'] },
+  { title: 'Contamination', help: 'Eau du robinet (analyses 2025 des ARS) et inventaires des sols pollués (Géorisques). Pour un potager ou des poules, ces chiffres signalent une commune à vigilance ; seule une analyse de sol de votre terrain dit s’il est pollué.', columns: ['pesticide_breach_share', 'pesticide_samples', 'pfas_max', 'pfas_breach_share', 'pfas_samples', 'sis_count', 'polluted_site_count', 'casias_count', 'casias_per_km2'] },
   { title: 'Sols, côte et risques', columns: ['risk_count', 'clay_high_share', 'clay_med_high_share', 'catnat_drought', 'ppr_flood', 'catnat_flood', 'risk_marine_flood', 'coast_retreat_decree', 'risk_coast_erosion', 'risk_forest_fire', 'ppr_industrial', 'radon_class'] },
   { title: 'Fiscalité et règles', columns: ['tfpb_rate', 'tfpb_total_avg_eur', 'second_home_surcharge', 'zone_tendue', 'zone_abc'] },
 ];

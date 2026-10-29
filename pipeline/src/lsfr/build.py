@@ -16,9 +16,9 @@ from pathlib import Path
 import polars as pl
 from shapely.geometry import mapping, shape
 
-from . import demand, dvf, living, vigieau
+from . import contamination, demand, dvf, living, vigieau
 from .cog import load_crosswalk, remap
-from .sources import DEPTS, DVF_YEARS, SOURCES, dep_dir
+from .sources import DEPTS, DIS_2025, DVF_YEARS, SOURCES, dep_dir
 
 DVF_END = "2025-12-31"  # last complete half-year in the April/October 2026 release
 DROUGHT_YEARS = ["2021", "2022", "2023", "2024", "2025"]
@@ -296,6 +296,19 @@ def demand_themes(raw: Path, x: dict, base: pl.DataFrame) -> dict[str, pl.DataFr
     }
 
 
+def contamination_themes(raw: Path, x: dict) -> dict[str, pl.DataFrame]:
+    ex = raw / "extra"
+    return {
+        "tapwater": contamination.water_substances(
+            [raw / dep_dir(d) / "dis-result-2025.parquet" for d in DEPTS],
+            [raw / dep_dir(d) / "dis-plv-2025.txt" for d in DEPTS], ex / "dis-com-udi-2025.txt", DEPTS, x),
+        "soil": contamination.soil(ex / "casias.csv", ex / "ssp-instruction.csv", ex / "sis.csv", x),
+    }
+
+
+# Heavy steps cached as parquet in raw/build/ (delete theme-<step>.json to recompute one).
+CACHED = ("dvf", "drought", "living", "demand", "contamination")
+
 # ---------------------------------------------------------------- assemble
 COLUMNS = {
     # key: (unit, description)
@@ -359,6 +372,15 @@ COLUMNS = {
     "aav_size": ("enum", "Size class of the attraction area"),
     "water_limit_breach_share": ("ratio", "Share of 2025 drinking-water samples breaking a health limit"),
     "water_reference_breach_share": ("ratio", "Share of 2025 samples breaking a quality reference"),
+    "pesticide_samples": ("count", "2025 tap-water samples analysed for pesticides"),
+    "pesticide_breach_share": ("ratio", "Share of those samples with a pesticide or metabolite over its limit"),
+    "pfas_samples": ("count", "2025 tap-water samples analysed for the sum of 20 PFAS"),
+    "pfas_max": ("µg/L", "Highest sum of 20 PFAS measured in 2025 (limit 0.1 µg/L)"),
+    "pfas_breach_share": ("ratio", "Share of PFAS samples over 0.1 µg/L"),
+    "casias_count": ("count", "CASIAS former industrial / service sites (Géorisques)"),
+    "casias_per_km2": ("sites/km²", "CASIAS sites per km²"),
+    "polluted_site_count": ("count", "Sites with known soil pollution under State action (ex-BASOL)"),
+    "sis_count": ("count", "Secteurs d'information sur les sols (SIS)"),
     "gp_count": ("count", "GPs in the commune (BPE 2025)"),
     "tfpb_total_avg_eur": ("€", "Average total property tax per tax account (estimate from REI 2025)"),
     "tenant_share": ("ratio", "Tenants / main residences (RP 2023)"),
@@ -407,19 +429,20 @@ def build(raw: Path, out: Path) -> None:
         ("drought", lambda: {"drought": drought(raw, x)}),
         ("living", lambda: living_themes(raw, x, base, feats)),
         ("demand", lambda: demand_themes(raw, x, base)),
+        ("contamination", lambda: contamination_themes(raw, x)),
     ]
     for name, fn in steps:
         t = time.time()
         # Heavy steps are cached as parquet in raw/build/ (delete the folder to recompute).
         cache = raw / "build" / f"theme-{name}.json"
-        if name in ("dvf", "drought", "living", "demand") and cache.exists():
+        if name in CACHED and cache.exists():
             names = json.loads(cache.read_text())
             themes.update({k: pl.read_parquet(raw / "build" / f"theme-{k}.parquet") for k in names})
             print(f"  {name:8s} cached", flush=True)
             continue
         part = fn()
         themes.update(part)
-        if name in ("dvf", "drought", "living", "demand"):
+        if name in CACHED:
             (raw / "build").mkdir(exist_ok=True)
             for k, v in part.items():
                 v.write_parquet(raw / "build" / f"theme-{k}.parquet")
@@ -438,7 +461,11 @@ def build(raw: Path, out: Path) -> None:
         (pl.col("rent_m2_house") * 12 / pl.col("price_m2_house")).alias("gross_yield_house"),
         (pl.col("tourist_beds") / pl.col("pop") * 1000).alias("tourist_beds_per_1000"),
         (pl.col("students").fill_null(0) / pl.col("pop") * 1000).alias("students_per_1000"),
+        # Absent from the Géorisques inventories = no site listed.
+        *(pl.col(c).fill_null(0) for c in ("casias_count", "polluted_site_count", "sis_count") if c in df.columns),
     )
+    if "casias_count" in df.columns:  # area (km²) = population / density
+        df = df.with_columns((pl.col("casias_count") * pl.col("density") / pl.col("pop")).alias("casias_per_km2"))
     # Boolean risk flags: absent from a source list means "not declared", not unknown.
     bool_cols = [c for c, (u, _) in COLUMNS.items() if u == "bool" and c in df.columns]
     df = df.with_columns(*(pl.col(c).fill_null(False) for c in bool_cols))
@@ -489,6 +516,10 @@ def build(raw: Path, out: Path) -> None:
          "vintage": "rentrée 2025 / session 2025", "url": "https://data.education.gouv.fr/", "credit": None},
         {"key": "students", "producer": "MESR – Atlas régional des effectifs étudiants", "licence": "Licence Ouverte 2.0",
          "vintage": "rentrée 2025", "url": "https://data.enseignementsup-recherche.gouv.fr/", "credit": None},
+        {"key": "tapwater", "producer": "Ministère de la Santé – contrôle sanitaire de l’eau distribuée, résultats par paramètre (pesticides, PFAS)",
+         "licence": "Licence Ouverte 2.0", "vintage": "analyses 2025", "url": DIS_2025, "credit": None},
+        {"key": "soil", "producer": "Géorisques / BRGM – CASIAS, sites et sols pollués (ex-BASOL), secteurs d’information sur les sols (SIS)",
+         "licence": "Licence Ouverte 2.0", "vintage": "extraction 2026-10", "url": "https://www.georisques.gouv.fr/donnees/bases-de-donnees", "credit": None},
     ]
     meta = {
         "built": date.today().isoformat(),
