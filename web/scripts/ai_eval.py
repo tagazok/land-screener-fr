@@ -29,12 +29,14 @@ for q in qs:
     use = next(c["toolUse"] for c in r["output"]["message"]["content"] if "toolUse" in c)
     plan = use["input"]
     got = {f"{f['column']}:{f['op']}" for f in plan.get("filters", [])}
+    if plan.get("tiers"):
+        got.add("tiers:" + "".join(sorted(plan["tiers"])))
     missing = [e for e in q["expect"] if not any(alt in got for alt in e.split("|"))]
     good = not missing and plan.get("mode") == q["mode"]
     ok += good
     print(f"{'OK ' if good else 'BAD'} {q['id']:15s} {time.time() - t:4.1f}s mode={plan.get('mode')} "
           f"strategy={plan.get('strategy')} deps={plan.get('departements')} color={plan.get('color_by')} "
-          f"forest={plan.get('forest_layer')}")
+          f"forest={plan.get('forest_layer')} tiers={plan.get('tiers')}")
     print("     filters:", ", ".join(f"{f['column']} {f['op']} {f['value']}" for f in plan.get("filters", [])))
     if missing:
         print("     MISSING:", missing)

@@ -17,6 +17,8 @@ export interface Plan {
   /** Remove the filters added earlier by the assistant before adding these. */
   reset_filters: boolean;
   filters: { column: string; op: PlanOp; value: number | null }[];
+  /** Score groups to keep (A = best 20 %, E = worst 20 %); null = no change. */
+  tiers: ('A' | 'B' | 'C' | 'D' | 'E')[] | null;
   color_by: string | null;
   forest_layer: boolean | null;
   relief_layer: boolean | null;
@@ -28,7 +30,7 @@ export function planSchema(columns: string[] = CATALOG_IDS) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['mode', 'strategy', 'departements', 'reset_filters', 'filters', 'color_by', 'forest_layer', 'relief_layer', 'summary'],
+    required: ['mode', 'strategy', 'departements', 'reset_filters', 'filters', 'tiers', 'color_by', 'forest_layer', 'relief_layer', 'summary'],
     properties: {
       mode: { type: 'string', enum: ['answer', 'action'] },
       strategy: { type: ['string', 'null'], enum: [...STRATEGY_IDS, null] },
@@ -45,6 +47,7 @@ export function planSchema(columns: string[] = CATALOG_IDS) {
           },
         },
       },
+      tiers: { type: ['array', 'null'], items: { type: 'string', enum: ['A', 'B', 'C', 'D', 'E'] }, maxItems: 5 },
       color_by: { type: ['string', 'null'], enum: [...columns, null] },
       forest_layer: { type: ['boolean', 'null'] },
       relief_layer: { type: ['boolean', 'null'] },
@@ -62,10 +65,11 @@ Traduis la demande de l'utilisateur en un objet JSON qui modifie l'affichage. R�
 - filters : une condition par critère. op "min" = au moins, "max" = au plus, "is_true"/"is_false" pour oui/non (value null).
 - Les valeurs en % s'écrivent en pourcentage : 5 veut dire 5 %. Les autres valeurs dans l'unité indiquée.
 - N'utilise que les colonnes listées. N'invente pas de critère que l'utilisateur n'a pas demandé.
-- mode "answer" si l'utilisateur pose une question ou décrit ce qu'il cherche ; "action" s'il demande seulement de changer la carte ou la liste (masquer, afficher, colorer).
+- mode : "action" UNIQUEMENT pour un ordre court sur l'affichage (masque, affiche, montre, garde, colore, exclus…). Dans tous les autres cas "answer" : une question, ou une description de ce que l'utilisateur cherche (« je veux », « je cherche », « une commune… », « où… », « quelles… »).
 - strategy : ${STRATEGY_TEXT}. null si non mentionné ; "live" pour quelqu'un qui veut y habiter.
 - departements : noms ou numéros de départements cités, sinon null.
 - reset_filters : true si la demande remplace la précédente, false si elle la complète.
+- tiers : groupes de score à garder. Chaque commune retenue a un score global et un groupe : A = les 20 % meilleures, puis B, C, D, E = les 20 % moins bonnes. « meilleur que C » ou « au moins B » = ["A","B"] ; « A ou B » = ["A","B"] ; « inférieur à C » = ["D","E"]. null si non mentionné.
 - color_by : une colonne pour colorer la carte si l'utilisateur le demande, sinon null.
 - forest_layer / relief_layer : true pour afficher les forêts / le relief, false pour les masquer, sinon null.
 - summary : une phrase en français qui résume ce que tu as compris.
@@ -111,6 +115,7 @@ export function parsePlan(text: string): Plan {
     departements: Array.isArray(p.departements) ? p.departements.map(String) : null,
     reset_filters: !!p.reset_filters,
     filters: Array.isArray(p.filters) ? p.filters : [],
+    tiers: Array.isArray(p.tiers) ? p.tiers.filter((t) => ['A', 'B', 'C', 'D', 'E'].includes(t)) : null,
     color_by: p.color_by && p.color_by in COLUMNS ? p.color_by : null,
     forest_layer: typeof p.forest_layer === 'boolean' ? p.forest_layer : null,
     relief_layer: typeof p.relief_layer === 'boolean' ? p.relief_layer : null,

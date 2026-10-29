@@ -1,7 +1,7 @@
 // Shareable URL state: strategy, property type and any filter/weight that
 // differs from the strategy preset. Version prefix lets old links degrade.
 
-import type { FilterDef, SignalDef } from './engine';
+import type { FilterDef, SignalDef, Tier } from './engine';
 import { COLUMNS, preset, type PropertyType, type StrategyId, type Strategy } from './strategies';
 
 export interface UrlState {
@@ -16,6 +16,8 @@ export interface UrlState {
   finance?: string;
   /** Free-form filters on any column (added by the assistant or by hand). */
   custom?: FilterDef[];
+  /** Score groups to keep (A-E); empty = all. */
+  tiers?: Tier[];
 }
 
 const OPS = ['min', 'max', 'isTrue', 'isFalse'] as const;
@@ -65,6 +67,7 @@ export function encode(st: UrlState): string {
   if (st.scopes?.length) p.set('z', [...st.scopes].sort().join(','));
   if (st.finance) p.set('fi', st.finance);
   if (st.custom?.length) p.set('x', encodeCustom(st.custom));
+  if (st.tiers?.length) p.set('g', st.tiers.join(''));
   return p.toString().replace(/%2C/g, ',').replace(/%3A/g, ':').replace(/%7E/g, '~');
 }
 
@@ -81,6 +84,7 @@ export function decode(hash: string): UrlState {
     scopes: [...new Set((p.get('z') ?? '').split(',').map((s) => s.trim().toUpperCase()).filter((s) => /^(\d{2}|2[AB])$/.test(s)))].sort(),
     finance: p.get('fi') ?? undefined,
     custom: decodeCustom(p.get('x'), (c) => c in COLUMNS),
+    tiers: [...new Set((p.get('g') ?? '').toUpperCase().split('').filter((t) => 'ABCDE'.includes(t)))].sort() as Tier[],
   };
   if (p.get('v') !== '1') return state;
   for (const f of state.filters) {

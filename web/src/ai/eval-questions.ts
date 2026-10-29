@@ -18,6 +18,8 @@ export const QUESTIONS: EvalQuestion[] = [
   { id: 'small-growing', mode: 'answer', text: 'Je cherche un village de moins de 1500 habitants dont la population augmente', expect: ['pop:max', 'pop_cagr_11y:min'] },
   { id: 'no-flood-hills', mode: 'answer', text: 'Une commune vallonnée sans aucune inondation enregistrée, dans les Vosges', expect: ['relief_m:min', 'catnat_flood:max'] },
   { id: 'tourism-rising', mode: 'answer', text: 'Quelles communes deviennent de plus en plus touristiques ?', expect: ['second_homes_change:min'] },
+  { id: 'tiers-best', mode: 'action', text: 'Garde seulement les communes des groupes A et B', expect: ['tiers:AB'] },
+  { id: 'tiers-below', mode: 'action', text: 'Seulement celles avec un score inférieur à C', expect: ['tiers:DE'] },
   {
     id: 'olivier', mode: 'answer',
     text: 'Je veux vivre dans un endroit sans pollution, sans risque de feu et sans problème d’eau (pollution ou restrictions). Un petit village de 1000 habitants me va très bien tant qu’il y a une ville d’environ 3000 habitants à proximité. Je veux être près d’une forêt, de préférence sur un terrain qui n’est pas plat : j’aime la montagne ou les collines, et marcher dans ces endroits. Aucune inondation enregistrée. Une population en croissance de préférence, mais ce n’est pas un critère essentiel. Un endroit touristique, et qui l’est devenu récemment.',

@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing, svg } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
-import { compareScore, evaluate, num, type FilterDef, type Row, type Scored, type SignalDef } from '../engine';
+import { compareScore, evaluate, num, type FilterDef, type Row, type Scored, type SignalDef, type Tier } from '../engine';
 import { CSV_SEP, csvValue, fmt } from '../format';
 import { VERDICT_LABEL, judge, type Verdict } from '../judge';
 import { DEFAULT_FINANCE, REFERENCE_SURFACE, decodeFinance, encodeFinance, simulate, withFinance, type Finance } from '../finance';
@@ -101,6 +101,8 @@ export class AppRoot extends LitElement {
   @state() private filters: FilterDef[] = [];
   /** Free-form filters on any column, kept across strategy changes. */
   @state() private custom: FilterDef[] = [];
+  /** Keep only these score groups (empty = all). Applied after scoring, so groups keep their meaning. */
+  @state() private tiers: Tier[] = [];
   @state() private signals: SignalDef[] = [];
   @state() private selected: string | null = null;
   @state() private sort: SortKey = null;
@@ -232,12 +234,13 @@ export class AppRoot extends LitElement {
     this.scopes = s.scopes ?? [];
     this.finance = decodeFinance(s.finance ?? null);
     this.custom = s.custom ?? [];
+    this.tiers = s.tiers ?? [];
     this.columns = defaultColumns(s.strategy);
   }
 
   private pushUrl() {
     const h = encode({
-      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom,
+      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom, tiers: this.tiers,
     });
     history.replaceState(null, '', `#${h}`);
   }
@@ -361,7 +364,11 @@ export class AppRoot extends LitElement {
         applied.push(codes.length ? this.scopeLabel : 'Toute la France');
       }
     }
-    if (plan.reset_filters) this.custom = [];
+    if (plan.reset_filters) { this.custom = []; this.tiers = []; }
+    if (plan.tiers?.length) {
+      this.tiers = [...new Set(plan.tiers)].sort() as Tier[];
+      applied.push(`Groupes ${this.tiers.join(', ')}`);
+    }
     const { filters, dropped: badCols } = planFilters(plan);
     dropped.push(...badCols);
     if (filters.length) {
@@ -415,7 +422,7 @@ export class AppRoot extends LitElement {
   // ------------------------------------------------------------ derived
   // 35 000 communes: derive/evaluate are cached and only recomputed when their inputs change.
   private _rows?: { raw: Row[]; type: PropertyType; finance: Finance; out: Row[] };
-  private _res?: { rows: Row[]; scope: string; filters: FilterDef[]; custom: FilterDef[]; signals: SignalDef[]; out: Scored[] };
+  private _res?: { rows: Row[]; scope: string; filters: FilterDef[]; custom: FilterDef[]; tiers: Tier[]; signals: SignalDef[]; out: Scored[] };
 
   private get rows(): Row[] {
     const c = this._rows;
@@ -430,11 +437,15 @@ export class AppRoot extends LitElement {
     const rows = this.rows;
     const c = this._res;
     const key = this.scopes.join(',');
-    if (c && c.rows === rows && c.scope === key && c.filters === this.filters && c.custom === this.custom && c.signals === this.signals) return c.out;
+    if (c && c.rows === rows && c.scope === key && c.filters === this.filters && c.custom === this.custom && c.tiers === this.tiers && c.signals === this.signals) return c.out;
     const set = new Set(this.scopes);
     const inScope = set.size ? rows.filter((r) => set.has(r.dep as string)) : rows;
-    const out = evaluate(inScope, [...this.filters, ...this.custom], this.signals);
-    this._res = { rows, scope: key, filters: this.filters, custom: this.custom, signals: this.signals, out };
+    let out = evaluate(inScope, [...this.filters, ...this.custom], this.signals);
+    if (this.tiers.length) {
+      const keep = new Set(this.tiers);
+      out = out.map((r) => (r.pass && !keep.has(r.tier!) ? { ...r, pass: false, failed: ['tiers'] } : r));
+    }
+    this._res = { rows, scope: key, filters: this.filters, custom: this.custom, tiers: this.tiers, signals: this.signals, out };
     return out;
   }
 
@@ -587,6 +598,7 @@ export class AppRoot extends LitElement {
                         ${t === 'house' ? 'Maison' : 'Appartement'}</button>`)}
                   </div>${tip('Type de bien', HELP.type)}` : nothing}
                 ${active.map((f) => html`<span class="chip">${this.filterChip(f)}</span>`)}
+                ${this.tiers.length ? html`<span class="chip custom" title="Filtre ajouté">Groupes ${this.tiers.join(', ')}<button aria-label="Retirer le filtre sur les groupes" @click=${() => { this.tiers = []; this.pushUrl(); }}>×</button></span>` : nothing}
                 ${this.custom.map((f) => html`<span class="chip custom" title="Filtre ajouté">${this.filterChip(f)}<button aria-label="Retirer le filtre ${this.filterChip(f)}" @click=${() => this.removeCustom(f.id)}>×</button></span>`)}
               </div>
             </div>
@@ -940,7 +952,7 @@ export class AppRoot extends LitElement {
                 <div><span class="label">Score ${tip('Score', HELP.score)}</span><b>${fmt('score', r.score)}</b><small>/100</small></div>
                 <div><span class="label">Groupe ${tip('Groupe', HELP.tier)}</span><b>${r.tier}</b></div>
               </div>`
-            : html`<p class="failbox">Éliminée par : ${r.failed.map((f) => FILTERS[f]?.label ?? this.filterChip([...this.custom].find((c) => c.id === f) ?? { id: f, column: f, op: 'min', enabled: true })).join(', ')}</p>`}
+            : html`<p class="failbox">Éliminée par : ${r.failed.map((f) => f === 'tiers' ? `groupe ${r.tier ?? ''} hors des groupes ${this.tiers.join(', ')}` : FILTERS[f]?.label ?? this.filterChip([...this.custom].find((c) => c.id === f) ?? { id: f, column: f, op: 'min', enabled: true })).join(', ')}</p>`}
 
           ${this.summaries[row.code] ? html`
             <section class="ai" aria-label="Résumé IA">
