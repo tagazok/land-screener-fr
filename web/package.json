@@ -10,8 +10,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "dompurify": "^3.4.17",
     "lit": "3.2.1",
     "maplibre-gl": "4.7.1",
+    "marked": "^18.1.2",
     "pmtiles": "4.5.0"
   },
   "devDependencies": {

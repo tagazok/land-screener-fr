@@ -1,5 +1,8 @@
 import { LitElement, css, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { unsafeHTML } from 'lit/directives/unsafe-html.js';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 import type { Plan } from '../ai/plan';
 import {
   DEFAULT_SETTINGS, assistant, loadSettings, nanoAvailability, saveSettings, type AiSettings, type NanoState,
@@ -22,6 +25,25 @@ const EXAMPLES = [
   'Montre les communes où le prix des appartements a baissé en 3 ans',
   'Je veux vivre dans un village près d’une forêt, en colline, sans pollution ni inondation, avec une ville de 3 000 habitants à côté',
 ];
+
+/**
+ * Model output is untrusted: Markdown -> HTML, then sanitized. Only formatting tags survive
+ * (no scripts, styles, images, iframes or forms); links open in a new tab.
+ */
+function renderMarkdown(text: string) {
+  const raw = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
+  const clean = DOMPurify.sanitize(raw, {
+    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'b', 'i', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'h3', 'h4', 'h5', 'blockquote', 'code', 'pre', 'hr', 'a', 'del'],
+    ALLOWED_ATTR: ['href', 'align'],
+    ALLOWED_URI_REGEXP: /^https:\/\//i,
+  });
+  const box = document.createElement('div');
+  box.innerHTML = clean;
+  box.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+  // h1/h2 are not in the allowed list: their text is kept as plain paragraphs, too big for a chat bubble otherwise.
+  return unsafeHTML(box.innerHTML);
+}
 
 @customElement('ai-chat')
 export class AiChat extends LitElement {
@@ -130,7 +152,7 @@ export class AiChat extends LitElement {
             ${EXAMPLES.map((e) => html`<button class="ex" @click=${() => this.send(e)} ?disabled=${!this.ready}>${e}</button>`)}`}
           ${this.msgs.map((m) => html`
             <div class="msg ${m.role}">
-              <p>${m.text}</p>
+              ${m.role === 'assistant' ? html`<div class="md">${renderMarkdown(m.text)}</div>` : html`<p>${m.text}</p>`}
               ${m.chips?.length ? html`<div class="chips">${m.chips.map((c) => html`<span>${c}</span>`)}</div>` : nothing}
             </div>`)}
           ${this.busy ? html`<div class="msg assistant busy"><span class="spinner"></span> ${this.busy}
@@ -187,6 +209,17 @@ export class AiChat extends LitElement {
     .ex:disabled { opacity: .5; cursor: default; }
     .msg { border-radius: 12px; padding: 9px 11px; font-size: 13.5px; line-height: 1.5; max-width: 92%; }
     .msg p { margin: 0; white-space: pre-wrap; }
+    .md { overflow-x: auto; }
+    .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+    .md p { white-space: normal; margin: 0 0 8px; }
+    .md ul, .md ol { margin: 4px 0 8px; padding-left: 20px; } .md li { margin: 2px 0; }
+    .md h3, .md h4, .md h5 { font-size: 13.5px; margin: 10px 0 4px; }
+    .md table { border-collapse: collapse; font-size: 12.5px; margin: 6px 0 8px; width: 100%; }
+    .md th, .md td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+    .md th { color: var(--muted); font-weight: 650; }
+    .md code { font-size: 12px; background: var(--surface); padding: 1px 4px; border-radius: 4px; }
+    .md blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+    .md a { color: var(--brand-2); }
     .msg.user { align-self: flex-end; background: var(--brand); color: #fff; }
     .msg.assistant { align-self: flex-start; background: var(--surface-2); }
     .msg.error { align-self: flex-start; background: var(--bad-bg); color: var(--bad); }
