@@ -9,10 +9,13 @@ import {
   COLUMNS, DETAIL_GROUPS, FILTERS, HELP, SIGNALS, STRATEGIES, columnHelp, derive, missingDataNote, preset,
   type PropertyType, type StrategyId,
 } from '../strategies';
-import { decode, encode } from '../url';
+import { customFilter, decode, encode } from '../url';
 import { TIER_COLORS, type Bounds, type MapView, type Paint } from './map-view';
 import './map-view';
 import './info-tip';
+import './ai-chat';
+import type { ChatHost } from './ai-chat';
+import { planFilters, type Plan } from '../ai/plan';
 
 interface Meta {
   built: string;
@@ -96,6 +99,8 @@ export class AppRoot extends LitElement {
   @state() private strategy: StrategyId = 'long';
   @state() private type: PropertyType = 'house';
   @state() private filters: FilterDef[] = [];
+  /** Free-form filters on any column, kept across strategy changes. */
+  @state() private custom: FilterDef[] = [];
   @state() private signals: SignalDef[] = [];
   @state() private selected: string | null = null;
   @state() private sort: SortKey = null;
@@ -226,12 +231,13 @@ export class AppRoot extends LitElement {
     this.selected = s.selected;
     this.scopes = s.scopes ?? [];
     this.finance = decodeFinance(s.finance ?? null);
+    this.custom = s.custom ?? [];
     this.columns = defaultColumns(s.strategy);
   }
 
   private pushUrl() {
     const h = encode({
-      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance),
+      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom,
     });
     history.replaceState(null, '', `#${h}`);
   }
@@ -316,6 +322,82 @@ export class AppRoot extends LitElement {
     this.pushUrl();
   }
 
+  /** Add or replace a free-form filter (one per column and operator). */
+  addCustom(column: string, op: FilterDef['op'], value?: number) {
+    const f = customFilter(column, op, value);
+    this.custom = [...this.custom.filter((x) => x.id !== f.id), f];
+    this.shown = PAGE;
+    this.pushUrl();
+  }
+
+  removeCustom(id: string) {
+    this.custom = this.custom.filter((x) => x.id !== id);
+    this.pushUrl();
+  }
+
+  /** Bridge for the assistant: it only ever goes through these two functions. */
+  private chatHost: ChatHost = {
+    applyPlan: (plan: Plan) => this.applyPlan(plan),
+    facts: () => this.chatFacts(),
+  };
+
+  private applyPlan(plan: Plan): { applied: string[]; dropped: string[] } {
+    const applied: string[] = [];
+    if (plan.strategy && plan.strategy !== this.strategy) {
+      this.setStrategy(plan.strategy);
+      applied.push(STRATEGIES.find((s) => s.id === plan.strategy)!.label);
+    }
+    const dropped: string[] = [];
+    if (plan.departements) {
+      const codes: string[] = [];
+      for (const d of plan.departements) {
+        const q = fold(d.trim());
+        const code = /^(\d{2}|2[ab])$/i.test(q) ? q.toUpperCase()
+          : Object.entries(this.depNames).find(([, n]) => fold(n) === q)?.[0];
+        if (code && code in this.depNames) codes.push(code); else dropped.push(d);
+      }
+      if (codes.length || !plan.departements.length) {
+        this.setScopes(codes);
+        applied.push(codes.length ? this.scopeLabel : 'Toute la France');
+      }
+    }
+    if (plan.reset_filters) this.custom = [];
+    const { filters, dropped: badCols } = planFilters(plan);
+    dropped.push(...badCols);
+    if (filters.length) {
+      const ids = new Set(filters.map((f) => f.id));
+      this.custom = [...this.custom.filter((x) => !ids.has(x.id)), ...filters];
+      applied.push(...filters.map((f) => this.filterChip(f)));
+    }
+    if (plan.color_by && plan.color_by in COLUMNS && !['bool', 'text'].includes(COLUMNS[plan.color_by].unit)) {
+      this.colorBy = plan.color_by;
+      applied.push(`Carte : ${COLUMNS[plan.color_by].label}`);
+    }
+    if (plan.forest_layer !== null || plan.relief_layer !== null) {
+      this.overlays = { forest: plan.forest_layer ?? this.overlays.forest, relief: plan.relief_layer ?? this.overlays.relief };
+      if (plan.forest_layer !== null) applied.push(plan.forest_layer ? 'Forêts affichées' : 'Forêts masquées');
+      if (plan.relief_layer !== null) applied.push(plan.relief_layer ? 'Relief affiché' : 'Relief masqué');
+    }
+    this.showFailing = false;
+    this.sort = null;
+    this.shown = PAGE;
+    this.pushUrl();
+    return { applied, dropped };
+  }
+
+  /** The best communes now shown, with the values the user filtered on, as compact text for the model. */
+  private chatFacts(): { count: number; text: string } {
+    const passing = this.results.filter((r) => r.pass).sort(compareScore);
+    const cols = [...new Set([...this.custom.map((f) => f.column), 'pop', 'town3000_name', 'town3000_km', 'price_m2', 'risk_count'])]
+      .filter((c) => c in COLUMNS).slice(0, 12);
+    const lines = passing.slice(0, 8).map((r) => {
+      const dep = this.depNames[r.row.dep as string] ?? r.row.dep;
+      const vals = cols.map((c) => `${COLUMNS[c].label} ${fmt(c, r.row[c])}`).join(' ; ');
+      return `- ${r.row.nom} (${dep}) : ${vals}`;
+    });
+    return { count: passing.length, text: `${passing.length} communes au total.\n${lines.join('\n')}` };
+  }
+
   private updateSignal(id: string, weight: number) {
     this.signals = this.signals.map((s) => (s.id === id ? { ...s, weight } : s));
     this.pushUrl();
@@ -333,7 +415,7 @@ export class AppRoot extends LitElement {
   // ------------------------------------------------------------ derived
   // 35 000 communes: derive/evaluate are cached and only recomputed when their inputs change.
   private _rows?: { raw: Row[]; type: PropertyType; finance: Finance; out: Row[] };
-  private _res?: { rows: Row[]; scope: string; filters: FilterDef[]; signals: SignalDef[]; out: Scored[] };
+  private _res?: { rows: Row[]; scope: string; filters: FilterDef[]; custom: FilterDef[]; signals: SignalDef[]; out: Scored[] };
 
   private get rows(): Row[] {
     const c = this._rows;
@@ -348,11 +430,11 @@ export class AppRoot extends LitElement {
     const rows = this.rows;
     const c = this._res;
     const key = this.scopes.join(',');
-    if (c && c.rows === rows && c.scope === key && c.filters === this.filters && c.signals === this.signals) return c.out;
+    if (c && c.rows === rows && c.scope === key && c.filters === this.filters && c.custom === this.custom && c.signals === this.signals) return c.out;
     const set = new Set(this.scopes);
     const inScope = set.size ? rows.filter((r) => set.has(r.dep as string)) : rows;
-    const out = evaluate(inScope, this.filters, this.signals);
-    this._res = { rows, scope: key, filters: this.filters, signals: this.signals, out };
+    const out = evaluate(inScope, [...this.filters, ...this.custom], this.signals);
+    this._res = { rows, scope: key, filters: this.filters, custom: this.custom, signals: this.signals, out };
     return out;
   }
 
@@ -505,6 +587,7 @@ export class AppRoot extends LitElement {
                         ${t === 'house' ? 'Maison' : 'Appartement'}</button>`)}
                   </div>${tip('Type de bien', HELP.type)}` : nothing}
                 ${active.map((f) => html`<span class="chip">${this.filterChip(f)}</span>`)}
+                ${this.custom.map((f) => html`<span class="chip custom" title="Filtre ajouté">${this.filterChip(f)}<button aria-label="Retirer le filtre ${this.filterChip(f)}" @click=${() => this.removeCustom(f.id)}>×</button></span>`)}
               </div>
             </div>
             <button class="btn primary" @click=${() => (this.settingsOpen = true)} aria-haspopup="dialog">
@@ -537,6 +620,7 @@ export class AppRoot extends LitElement {
       </div>
 
       ${this.settingsOpen ? this.renderSettings(results, st.label) : nothing}
+      ${this.raw.length ? html`<ai-chat .host=${this.chatHost}></ai-chat>` : nothing}
       ${this.loadingMb !== null ? html`
         <div class="loading" role="status" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>
@@ -856,7 +940,7 @@ export class AppRoot extends LitElement {
                 <div><span class="label">Score ${tip('Score', HELP.score)}</span><b>${fmt('score', r.score)}</b><small>/100</small></div>
                 <div><span class="label">Groupe ${tip('Groupe', HELP.tier)}</span><b>${r.tier}</b></div>
               </div>`
-            : html`<p class="failbox">Éliminée par : ${r.failed.map((f) => FILTERS[f]?.label ?? f).join(', ')}</p>`}
+            : html`<p class="failbox">Éliminée par : ${r.failed.map((f) => FILTERS[f]?.label ?? this.filterChip([...this.custom].find((c) => c.id === f) ?? { id: f, column: f, op: 'min', enabled: true })).join(', ')}</p>`}
 
           ${this.summaries[row.code] ? html`
             <section class="ai" aria-label="Résumé IA">
@@ -1116,6 +1200,9 @@ export class AppRoot extends LitElement {
     .summary-text p { margin: 0 0 10px; color: var(--muted); max-width: 820px; font-size: 14.5px; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .chip { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; color: var(--ink-2); }
+    .chip.custom { border-color: var(--brand-2); background: var(--brand-soft); display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
+    .chip.custom button { border: 0; background: transparent; color: var(--brand-2); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 5px; border-radius: 999px; }
+    .chip.custom button:hover { background: var(--surface); }
     .seg { display: inline-flex; background: var(--seg-bg); border-radius: 999px; padding: 3px; margin-right: 2px; }
     .seg button { border: 0; background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--muted); font-weight: 500; }
     .seg button.on { background: var(--surface); color: var(--brand); font-weight: 650; box-shadow: 0 1px 2px rgba(0,0,0,.12); }

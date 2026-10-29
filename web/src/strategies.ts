@@ -57,6 +57,16 @@ export const COLUMNS: Record<string, ColumnInfo> = {
     def: 'Évolution du prix médian au m² en 3 ans, maisons et appartements confondus.',
     calc: 'médiane des ventes de 2025 comparée à la médiane des ventes de 2022. Vide s’il y a moins de 10 ventes dans l’une des deux années.',
   },
+  price_trend_house: {
+    label: 'Prix maisons 2022→2025', unit: 'pct',
+    def: 'Évolution du prix médian au m² des maisons entre 2022 et 2025.',
+    calc: 'médiane DVF des ventes de maisons de 2025 ÷ médiane de 2022, moins 1. Vide s’il y a moins de 5 ventes l’une des deux années. 2025 encore incomplète (ventes enregistrées au 30 juin 2026).',
+  },
+  price_trend_apt: {
+    label: 'Prix appartements 2022→2025', unit: 'pct',
+    def: 'Évolution du prix médian au m² des appartements entre 2022 et 2025.',
+    calc: 'médiane DVF des ventes d’appartements de 2025 ÷ médiane de 2022, moins 1. Vide s’il y a moins de 5 ventes l’une des deux années. 2025 encore incomplète.',
+  },
   land_price_m2: {
     label: 'Terrain €/m²', unit: 'eur_m2',
     def: 'Prix médian au m² des terrains à bâtir vendus sur les 36 derniers mois (2023–2025).',
@@ -488,6 +498,9 @@ export function derive(raw: Row[], type: PropertyType): Row[] {
       rent_confidence: r[`rent_confidence_${type}`] ?? null,
       gross_yield: r[`gross_yield_${type}`] ?? null,
       risk_count: risks,
+      // Price change 2022 -> 2025 per property type, from the yearly medians (≥ 5 sales each year).
+      price_trend_house: n('hist_house_2022') && n('hist_house_2025') ? n('hist_house_2025')! / n('hist_house_2022')! - 1 : null,
+      price_trend_apt: n('hist_apt_2022') && n('hist_apt_2025') ? n('hist_apt_2025')! / n('hist_apt_2022')! - 1 : null,
       services_km: dists.length === DAILY_SERVICES.length ? dists.reduce((a, b) => a + b, 0) / dists.length : null,
     };
   });
@@ -867,7 +880,7 @@ export const SIGNALS: Record<string, { label: string; help: string }> = {
 
 /** Sections of the side panel. Columns missing from COLUMNS are skipped. */
 export const DETAIL_GROUPS: { title: string; help?: string; columns: string[] }[] = [
-  { title: 'Marché', columns: ['price_m2', 'n_sales', 'price_trend_3y', 'rent_m2', 'rent_confidence', 'gross_yield', 'net_yield', 'cashflow_month', 'land_price_m2', 'n_land_sales'] },
+  { title: 'Marché', columns: ['price_m2', 'n_sales', 'price_trend_3y', 'price_trend_house', 'price_trend_apt', 'rent_m2', 'rent_confidence', 'gross_yield', 'net_yield', 'cashflow_month', 'land_price_m2', 'n_land_sales'] },
   { title: 'Demande locative', columns: ['tenant_share', 'private_rent_share', 'furnished_share', 'social_share', 'unemployment_rate', 'jobs', 'jobs_per_active', 'students', 'students_per_1000'] },
   { title: 'Énergie des logements', columns: ['dpe_fg_share', 'dpe_g_share', 'dpe_count'] },
   { title: 'Habitants', columns: ['pop', 'pop_cagr_11y', 'density', 'median_income', 'vacancy_rate', 'town3000_km', 'town3000_name', 'aav_category', 'aav_name', 'aav_size'] },

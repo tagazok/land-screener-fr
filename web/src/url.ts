@@ -2,7 +2,7 @@
 // differs from the strategy preset. Version prefix lets old links degrade.
 
 import type { FilterDef, SignalDef } from './engine';
-import { preset, type PropertyType, type StrategyId, type Strategy } from './strategies';
+import { COLUMNS, preset, type PropertyType, type StrategyId, type Strategy } from './strategies';
 
 export interface UrlState {
   strategy: StrategyId;
@@ -14,6 +14,34 @@ export interface UrlState {
   scopes?: string[];
   /** Financing assumptions that differ from the defaults, encoded by finance.ts. */
   finance?: string;
+  /** Free-form filters on any column (added by the assistant or by hand). */
+  custom?: FilterDef[];
+}
+
+const OPS = ['min', 'max', 'isTrue', 'isFalse'] as const;
+
+/** A free-form filter: id "x:<column>:<op>" so it never collides with a preset filter. */
+export function customFilter(column: string, op: FilterDef['op'], value?: number): FilterDef {
+  return { id: `x:${column}:${op}`, column, op, value, enabled: true, requireData: false };
+}
+
+export const isCustom = (f: FilterDef) => f.id.startsWith('x:');
+
+function encodeCustom(list: FilterDef[]): string {
+  return list.map((f) => `${f.column}~${f.op}${f.value !== undefined ? `~${f.value}` : ''}`).join(',');
+}
+
+function decodeCustom(s: string | null, known: (c: string) => boolean): FilterDef[] {
+  if (!s) return [];
+  const out: FilterDef[] = [];
+  for (const part of s.split(',')) {
+    const [column, op, v] = part.split('~');
+    if (!column || !known(column) || !(OPS as readonly string[]).includes(op)) continue;
+    const value = v !== undefined && Number.isFinite(Number(v)) ? Number(v) : undefined;
+    if ((op === 'min' || op === 'max') && value === undefined) continue;
+    out.push(customFilter(column, op as FilterDef['op'], value));
+  }
+  return out;
 }
 
 export function encode(st: UrlState): string {
@@ -36,7 +64,8 @@ export function encode(st: UrlState): string {
   // Commas stay readable in the hash: #…&z=33,40,64
   if (st.scopes?.length) p.set('z', [...st.scopes].sort().join(','));
   if (st.finance) p.set('fi', st.finance);
-  return p.toString().replace(/%2C/g, ',').replace(/%3A/g, ':');
+  if (st.custom?.length) p.set('x', encodeCustom(st.custom));
+  return p.toString().replace(/%2C/g, ',').replace(/%3A/g, ':').replace(/%7E/g, '~');
 }
 
 export function decode(hash: string): UrlState {
@@ -51,6 +80,7 @@ export function decode(hash: string): UrlState {
     selected: p.get('c'),
     scopes: [...new Set((p.get('z') ?? '').split(',').map((s) => s.trim().toUpperCase()).filter((s) => /^(\d{2}|2[AB])$/.test(s)))].sort(),
     finance: p.get('fi') ?? undefined,
+    custom: decodeCustom(p.get('x'), (c) => c in COLUMNS),
   };
   if (p.get('v') !== '1') return state;
   for (const f of state.filters) {
