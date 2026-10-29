@@ -247,6 +247,30 @@
    "credit": null
   },
   {
+   "key": "relief",
+   "producer": "IGN – BD ALTI® V2, MNT 75 m",
+   "licence": "Licence Ouverte 2.0",
+   "vintage": "édition 2020",
+   "url": "https://geoservices.ign.fr/bdalti",
+   "credit": null
+  },
+  {
+   "key": "forest",
+   "producer": "ESA WorldCover 10 m 2021 v200 (Zanaga et al. 2022)",
+   "licence": "CC BY 4.0",
+   "vintage": "2021",
+   "url": "https://esa-worldcover.org/",
+   "credit": "© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium"
+  },
+  {
+   "key": "tourism_history",
+   "producer": "INSEE – capacité des communes en hébergement touristique, millésimes 2015 à 2026",
+   "licence": "Licence Ouverte 2.0",
+   "vintage": "2015–2026",
+   "url": "https://www.insee.fr/fr/statistiques/2021703",
+   "credit": null
+  },
+  {
    "key": "soil",
    "producer": "Géorisques / BRGM – CASIAS, sites et sols pollués (ex-BASOL), secteurs d’information sur les sols (SIS)",
    "licence": "Licence Ouverte 2.0",
@@ -516,6 +540,58 @@
    "unit": "ratio",
    "label": "Share of PFAS samples over 0.1 µg/L"
   },
+  "alt_mean": {
+   "unit": "m",
+   "label": "Mean altitude (IGN BD ALTI 75 m, averaged to 150 m)"
+  },
+  "alt_min": {
+   "unit": "m",
+   "label": "Lowest altitude in the commune"
+  },
+  "alt_max": {
+   "unit": "m",
+   "label": "Highest altitude in the commune"
+  },
+  "relief_m": {
+   "unit": "m",
+   "label": "Relief: 95th minus 5th percentile of altitude"
+  },
+  "forest_share": {
+   "unit": "ratio",
+   "label": "Share of land under tree cover (ESA WorldCover 2021)"
+  },
+  "forest_around_share": {
+   "unit": "ratio",
+   "label": "Share of tree cover within ~5 km (ESA WorldCover 2021)"
+  },
+  "town3000_km": {
+   "unit": "km",
+   "label": "Distance to the nearest commune of 3,000+ residents (0 = itself)"
+  },
+  "town3000_name": {
+   "unit": "text",
+   "label": "Nearest commune of 3,000+ residents"
+  },
+  "tour_beds_change": {
+   "unit": "ratio",
+   "label": "Change in tourist beds 2019 -> 2026 (INSEE)"
+  },
+  "tour_beds_added": {
+   "unit": "beds",
+   "label": "Tourist beds added 2019 -> 2026"
+  },
+  "second_homes_2022": {
+   "unit": "count",
+   "label": "Second homes 2022"
+  },
+  "second_homes_change": {
+   "unit": "ratio",
+   "label": "Change in second homes 2011 -> 2022"
+  },
+  "second_home_share_change": {
+   "unit": "ratio",
+   "label": "Change in second-home share of dwellings 2011 -> 2022 (points)"
+  },
   "casias_count": {
    "unit": "count",
    "label": "CASIAS former industrial / service sites (Géorisques)"
@@ -727,6 +803,19 @@
   "pfas_samples": 0.991,
   "pfas_max": 0.795,
   "pfas_breach_share": 0.795,
+  "alt_mean": 1.0,
+  "alt_min": 1.0,
+  "alt_max": 1.0,
+  "relief_m": 1.0,
+  "forest_share": 1.0,
+  "forest_around_share": 1.0,
+  "town3000_km": 1.0,
+  "town3000_name": 1.0,
+  "tour_beds_change": 0.227,
+  "tour_beds_added": 0.993,
+  "second_homes_2022": 0.993,
+  "second_homes_change": 0.675,
+  "second_home_share_change": 0.993,
   "casias_count": 1.0,
   "casias_per_km2": 0.993,
   "polluted_site_count": 1.0,
@@ -998,6 +1087,37 @@
     "44060",
     "49069",
     "49144"
+   ]
+  },
+  "relief": {
+   "matched": 34746,
+   "unmatched": []
+  },
+  "forest": {
+   "matched": 34746,
+   "unmatched": []
+  },
+  "tourism_history": {
+   "matched": 34494,
+   "unmatched": [
+    "02344",
+    "12076",
+    "14011",
+    "14513",
+    "14624",
+    "44060",
+    "49069",
+    "49144",
+    "69159"
+   ]
+  },
+  "second_homes": {
+   "matched": 34494,
+   "unmatched": [
+    "12076",
+    "14011",
+    "49069",
+    "69159"
    ]
   }
  }

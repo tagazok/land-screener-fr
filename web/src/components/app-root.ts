@@ -105,6 +105,8 @@ export class AppRoot extends LitElement {
   @state() private mapFull = false;
   @state() private finance: Finance = { ...DEFAULT_FINANCE };
   @state() private colorBy = 'score';
+  /** Background map layers (IGN forest mask, shaded relief). */
+  @state() private overlays = { forest: false, relief: false };
   @state() private greyFailing = true;
   @state() private columns: string[] = [];
   @state() private theme: 'auto' | 'light' | 'dark' = 'auto';
@@ -648,6 +650,12 @@ export class AppRoot extends LitElement {
           ${this.colorBy !== 'score' ? html`${colTip(this.colorBy)}
             <label class="switchlabel"><input class="switch" type="checkbox" .checked=${this.greyFailing}
               @change=${(e: Event) => (this.greyFailing = (e.target as HTMLInputElement).checked)}> Griser les communes éliminées</label>` : nothing}
+          <div class="seg" role="group" aria-label="Fonds de carte">
+            ${([['forest', 'Forêts', 'Afficher les forêts (IGN, masque forêt 2021–2023). Visible à partir du zoom régional.'],
+                ['relief', 'Relief', 'Afficher le relief ombré (IGN, estompage)']] as const).map(([k, l, title]) => html`
+              <button aria-pressed=${this.overlays[k] ? 'true' : 'false'} class=${this.overlays[k] ? 'on' : ''} title=${title}
+                @click=${() => (this.overlays = { ...this.overlays, [k]: !this.overlays[k] })}>${l}</button>`)}
+          </div>${tip('Forêts et relief', HELP.overlays)}
           <span class="grow"></span>
           <span class="hint">Cliquez une commune pour son détail</span>
           <button class="btn icon" @click=${() => this.setMapFull(!this.mapFull)}
@@ -659,7 +667,7 @@ export class AppRoot extends LitElement {
         </div>
         <div class="mapwrap">
           <map-view .tiles=${'./data/communes.pmtiles'} .departements=${this.departements} .zoomTo=${this.zoomTo}
-            .paint=${paint} .selected=${this.selected} .dark=${this.dark}
+            .paint=${paint} .selected=${this.selected} .dark=${this.dark} .overlays=${this.overlays}
             @select=${(e: CustomEvent<string>) => this.select(e.detail)}></map-view>
           ${this.renderScale(label, scale)}
         </div>
@@ -885,6 +893,7 @@ export class AppRoot extends LitElement {
           ${this.detailWarnings(row)}
           ${this.renderSimulation(row)}
           ${this.renderHistory(row)}
+          ${this.renderTourism(row)}
 
           ${DETAIL_GROUPS.map((g) => html`
             <details open class="grp">
@@ -962,6 +971,38 @@ export class AppRoot extends LitElement {
           <dt><b>Cash-flow mensuel</b>${colTip('cashflow_month')}</dt><dd>${val('cashflow_month', Math.round(sim.cashflowMonth))}</dd>
         </dl>
         <p class="muted small">Avant impôt sur le revenu et assurance emprunteur. Le loyer ANIL est charges comprises : le revenu réel est un peu plus bas.</p>
+      </details>`;
+  }
+
+  /** Tourist beds per year (INSEE 2015–2026) as bars, and second homes at the last three censuses. */
+  private renderTourism(row: Row) {
+    const years = Array.from({ length: 12 }, (_, i) => String(2015 + i));
+    const beds = years.map((y) => num(row[`tour_beds_${y}`]) ?? 0);
+    const homes = [['2011', num(row.second_homes_2011)], ['2016', num(row.second_homes_2016)], ['2022', num(row.second_homes_2022)]] as const;
+    if (!beds.some((b) => b > 0) && !homes.some(([, v]) => (v ?? 0) > 0)) return nothing;
+    const W = 300, H = 110, padL = 40, padB = 16, padT = 8;
+    const max = Math.max(1, ...beds);
+    const bw = (W - padL) / years.length;
+    const y = (v: number) => padT + (H - padT - padB) * (1 - v / max);
+    const int = (v: number) => Math.round(v).toLocaleString('fr-FR');
+    return html`
+      <details open class="grp">
+        <summary>Tourisme : évolution${tip('Tourisme : évolution', HELP.tourism)}</summary>
+        <svg class="hist" viewBox="0 0 ${W} ${H}" role="img" aria-label="Lits touristiques par an, 2015 à 2026">
+          ${[0, max / 2, max].map((v) => svg`<text x=${padL - 4} y=${y(v) + 3} text-anchor="end" class="ax">${int(v)}</text>
+            <line x1=${padL} x2=${W} y1=${y(v)} y2=${y(v)} class="grid"></line>`)}
+          ${beds.map((b, i) => svg`<rect x=${padL + i * bw + bw * 0.15} width=${bw * 0.7} y=${y(b)} height=${H - padB - y(b)}
+            fill="var(--brand-2)" opacity="0.75"><title>${years[i]} : ${int(b)} lits touristiques</title></rect>`)}
+          ${years.map((yy, i) => (i % 2 === 0 || i === years.length - 1)
+            ? svg`<text x=${padL + (i + 0.5) * bw} y=${H - 3} text-anchor="middle" class="ax">${yy.slice(2)}</text>` : nothing)}
+        </svg>
+        <div class="legendrow"><span><i style="background:var(--brand-2)"></i>Lits touristiques (hôtels, campings, résidences, villages vacances), 2015–2026</span></div>
+        <dl class="kv">
+          <dt>Résidences secondaires ${homes.map(([yy]) => yy).join(' / ')}${colTip('second_homes_change')}</dt>
+          <dd>${homes.map(([, v]) => (v === null ? '—' : int(v))).join(' / ')}</dd>
+          <dt>Évolution des lits 2019 → 2026${colTip('tour_beds_change')}</dt><dd>${val('tour_beds_change', row.tour_beds_change)}</dd>
+          <dt>Évolution résid. secondaires 2011 → 2022</dt><dd>${val('second_homes_change', row.second_homes_change)}</dd>
+        </dl>
       </details>`;
   }
 
