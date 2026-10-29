@@ -233,6 +233,7 @@ export class AiChat extends LitElement {
     };
     saveSettings(this.settings);
     this.settingsOpen = false;
+    this.draftProvider = this.draftWeb = null;
   }
 
   private nanoText(): string {
@@ -255,7 +256,7 @@ export class AiChat extends LitElement {
       <section class="panel" role="dialog" aria-label="Assistant">
         <header>
           <b>✦ Assistant</b>
-          <small>${s.provider === 'bedrock' ? `Bedrock · ${s.bedrockModel.replace(/^us\./, '')}` : 'Gemini Nano (local)'}</small>
+          <small title=${s.provider === 'bedrock' ? s.bedrockModel : ''}>${s.provider === 'bedrock' ? `Bedrock · ${s.bedrockModel.replace(/^(us|eu|apac|global)\./, '').replace(/^anthropic\./, '')}` : 'Gemini Nano (local)'}</small>
           <span class="grow"></span>
           <button class="icon dock" title=${this.docked ? 'Détacher (fenêtre flottante)' : 'Ancrer à gauche de la page'}
             aria-pressed=${this.docked ? 'true' : 'false'} aria-label=${this.docked ? 'Détacher l’assistant' : 'Ancrer l’assistant à gauche'}
@@ -270,7 +271,7 @@ export class AiChat extends LitElement {
         ${this.docked ? html`<div class="resize" role="separator" aria-orientation="vertical" aria-label="Redimensionner l’assistant"
           title="Glisser pour changer la largeur" @pointerdown=${(e: PointerEvent) => this.startResize(e)}></div>` : nothing}
         ${this.settingsOpen ? this.renderSettings() : nothing}
-        <div class="log" aria-live="polite">
+        <div class="log" aria-live="polite" ?hidden=${this.settingsOpen}>
           ${this.msgs.length ? nothing : html`
             <p class="muted">${s.provider === 'nano' ? this.nanoText() : 'Les questions sont envoyées à Amazon Bedrock avec votre clé.'}</p>
             <p class="muted">Décrivez ce que vous cherchez ou demandez un changement de la carte. Exemples :</p>
@@ -285,7 +286,7 @@ export class AiChat extends LitElement {
             ${this.progress !== null && this.progress < 1 ? html` (téléchargement du modèle ${Math.round(this.progress * 100)} %)` : nothing}
             <button class="link" @click=${() => this.abort?.abort()}>Arrêter</button></div>` : nothing}
         </div>
-        <form class="ask" @submit=${(e: Event) => { e.preventDefault(); this.send(); }}>
+        <form class="ask" ?hidden=${this.settingsOpen} @submit=${(e: Event) => { e.preventDefault(); this.send(); }}>
           <textarea rows="2" placeholder=${this.ready ? 'Votre demande…' : 'Assistant indisponible : voir les réglages ⚙'}
             .value=${this.draft} ?disabled=${!this.ready || !!this.busy}
             @input=${(e: Event) => (this.draft = (e.target as HTMLTextAreaElement).value)}
@@ -295,25 +296,54 @@ export class AiChat extends LitElement {
       </section>`;
   }
 
+  /** Choices being edited in the settings form, so the form shows only what applies. */
+  @state() private draftProvider: AiSettings['provider'] | null = null;
+  @state() private draftWeb: boolean | null = null;
+
   private renderSettings() {
     const s = this.settings;
+    const provider = this.draftProvider ?? s.provider;
+    const web = this.draftWeb ?? s.webSearch;
+    const bedrock = provider === 'bedrock';
     return html`
       <form class="settings" @submit=${(e: Event) => this.saveSettings(e)}>
-        <fieldset>
-          <legend>Modèle</legend>
-          <label><input type="radio" name="provider" value="nano" ?checked=${s.provider === 'nano'}> Gemini Nano dans Chrome (local, gratuit, rien ne sort de l’ordinateur)</label>
-          <label><input type="radio" name="provider" value="bedrock" ?checked=${s.provider === 'bedrock'}> Amazon Bedrock (votre clé, meilleur pour les demandes longues)</label>
-        </fieldset>
-        <label>Clé d’API Bedrock<input name="key" type="password" autocomplete="off" .value=${s.bedrockKey} placeholder="ABSK…"></label>
-        <div class="row">
-          <label>Région<input name="region" .value=${s.bedrockRegion}></label>
-          <label>Modèle<input name="model" .value=${s.bedrockModel}></label>
-        </div>
-        <label class="check"><input type="checkbox" name="web" ?checked=${s.webSearch}> Recherche web quand les données ne suffisent pas (actualités, vie locale…)</label>
-        <label>Modèle pour la recherche web (Amazon Nova, régions US)<input name="webmodel" .value=${s.webModel}></label>
-        <p class="muted small">La clé reste dans ce navigateur (stockage local), n’est jamais envoyée ailleurs qu’à Amazon Bedrock, et n’apparaît pas dans le lien de partage. Préférez une clé de courte durée, limitée à Bedrock.</p>
+        <section>
+          <h4>Modèle de l’assistant</h4>
+          <div class="choices" role="radiogroup">
+            <label class="choice ${!bedrock ? 'on' : ''}">
+              <input type="radio" name="provider" value="nano" ?checked=${!bedrock} @change=${() => (this.draftProvider = 'nano')}>
+              <span><b>Gemini Nano, dans Chrome</b><small>Local et gratuit : rien ne sort de l’ordinateur. Demandes courtes.</small></span>
+            </label>
+            <label class="choice ${bedrock ? 'on' : ''}">
+              <input type="radio" name="provider" value="bedrock" ?checked=${bedrock} @change=${() => (this.draftProvider = 'bedrock')}>
+              <span><b>Amazon Bedrock</b><small>Avec votre clé d’API. Meilleur pour les demandes longues, et peut chercher sur le web.</small></span>
+            </label>
+          </div>
+        </section>
+
+        <section ?hidden=${!bedrock}>
+          <h4>Connexion à Bedrock</h4>
+          <label class="field">Clé d’API<input name="key" type="password" autocomplete="off" .value=${s.bedrockKey} placeholder="ABSK…"></label>
+          <div class="row">
+            <label class="field narrow">Région<input name="region" .value=${s.bedrockRegion}></label>
+            <label class="field">Modèle (critères et réponses)<input name="model" .value=${s.bedrockModel} placeholder=${DEFAULT_SETTINGS.bedrockModel}></label>
+          </div>
+          <p class="hint">La clé reste dans ce navigateur, n’est envoyée qu’à Amazon Bedrock et n’apparaît pas dans le lien de partage. Préférez une clé de courte durée, limitée à Bedrock.</p>
+        </section>
+
+        <section ?hidden=${!bedrock}>
+          <h4>Recherche web</h4>
+          <label class="toggle">
+            <input type="checkbox" name="web" ?checked=${web} @change=${(e: Event) => (this.draftWeb = (e.target as HTMLInputElement).checked)}>
+            <span>Chercher sur le web quand les données ne suffisent pas <small>(actualités, projets, vie locale…)</small></span>
+          </label>
+          <label class="field" ?hidden=${!web}>Modèle de recherche (Amazon Nova, régions US uniquement)
+            <input name="webmodel" .value=${s.webModel} placeholder=${DEFAULT_SETTINGS.webModel}></label>
+        </section>
+
         <div class="row end">
-          ${s.bedrockKey ? html`<button type="button" class="link" @click=${() => { this.settings = { ...s, bedrockKey: '', provider: 'nano' }; saveSettings(this.settings); }}>Effacer la clé</button>` : nothing}
+          ${s.bedrockKey && bedrock ? html`<button type="button" class="link" @click=${() => { this.settings = { ...s, bedrockKey: '', provider: 'nano' }; this.draftProvider = null; saveSettings(this.settings); }}>Effacer la clé</button>` : nothing}
+          <button type="button" class="link" @click=${() => { this.settingsOpen = false; this.draftProvider = this.draftWeb = null; }}>Annuler</button>
           <button type="submit" class="send">Enregistrer</button>
         </div>
       </form>`;
@@ -333,7 +363,8 @@ export class AiChat extends LitElement {
     .panel { width: min(420px, calc(100vw - 36px)); height: min(620px, calc(100vh - 110px)); display: flex; flex-direction: column;
       background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.25); overflow: hidden; }
     header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-    header small { color: var(--muted); font-size: 12px; }
+    header b { white-space: nowrap; }
+    header small { color: var(--muted); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .grow { flex: 1; }
     .icon { border: 0; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; width: 30px; height: 30px; border-radius: 8px; }
     .icon:hover { background: var(--surface-2); color: var(--ink); }
@@ -370,13 +401,28 @@ export class AiChat extends LitElement {
     .send { border: 0; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 650; background: var(--brand); color: #fff; cursor: pointer; min-height: 36px; }
     .send:disabled { opacity: .45; cursor: default; }
     .link { border: 0; background: transparent; color: var(--brand-2); font: inherit; font-size: 12.5px; cursor: pointer; text-decoration: underline; }
-    .settings { padding: 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 9px; background: var(--surface-2); font-size: 13px; }
-    fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 5px; }
-    legend { font-weight: 650; margin-bottom: 4px; }
-    .settings label { display: flex; flex-direction: column; gap: 3px; }
-    .settings fieldset label, .settings label.check { flex-direction: row; align-items: flex-start; gap: 6px; }
-    .settings input:not([type=radio]) { font: inherit; padding: 6px 8px; border: 1px solid var(--input-line, var(--line)); border-radius: 8px; background: var(--input-bg, var(--surface)); color: var(--ink); width: 100%; box-sizing: border-box; }
-    .row { display: flex; gap: 8px; } .row > * { flex: 1; } .row.end { justify-content: flex-end; align-items: center; } .row.end > * { flex: none; }
+    [hidden] { display: none !important; }
+    /* Settings replace the conversation while open; the buttons stay visible at the bottom. */
+    .settings { flex: 1; min-height: 0; overflow: auto; padding: 12px 12px 0; display: flex; flex-direction: column; gap: 12px; background: var(--surface-2); font-size: 13px; }
+    .settings > .row.end { position: sticky; bottom: 0; margin: auto -12px 0; padding: 10px 12px; background: var(--surface-2); border-top: 1px solid var(--line); }
+    .settings section { display: flex; flex-direction: column; gap: 8px; }
+    .settings section + section { border-top: 1px solid var(--line); padding-top: 12px; }
+    .settings [hidden] { display: none !important; }
+    .settings h4 { margin: 0; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
+    .choices { display: flex; flex-direction: column; gap: 6px; }
+    .choice { display: flex; gap: 9px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; }
+    .choice.on { border-color: var(--brand-2); background: var(--brand-soft); }
+    .choice input { margin: 2px 0 0; accent-color: var(--brand-2); flex: none; }
+    .choice span, .toggle span { display: flex; flex-direction: column; gap: 1px; line-height: 1.35; }
+    .choice small, .toggle small { color: var(--muted); font-size: 12px; }
+    .toggle { display: flex; gap: 9px; align-items: flex-start; cursor: pointer; }
+    .toggle input { margin: 2px 0 0; accent-color: var(--brand-2); flex: none; width: 15px; height: 15px; }
+    .toggle span { display: block; }
+    .field { display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); font-size: 12.5px; font-weight: 600; min-width: 0; }
+    .field input { font: inherit; font-weight: 400; font-size: 13px; padding: 6px 8px; border: 1px solid var(--input-line, var(--line)); border-radius: 8px; background: var(--input-bg, var(--surface)); color: var(--ink); width: 100%; box-sizing: border-box; }
+    .hint { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .row { display: flex; gap: 8px; } .row > * { flex: 1; } .row > .narrow { flex: 0 0 34%; }
+    .row.end { justify-content: flex-end; align-items: center; gap: 12px; } .row.end > * { flex: none; }
     .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--brand-2); animation: spin .9s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   `;
