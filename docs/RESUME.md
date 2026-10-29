@@ -81,3 +81,7 @@ Known limits / next:
   Code: `pipeline/src/lsfr/demand.py`, build step "demand" (cached). Default weights changed: long term now
   favours net yield (and tenants, unemployment, F-G share), medium term students/jobs, live term crime/IPS.
   Scores and ranks moved accordingly, pass/fail counts did not. Tests: 14 pytest, 22 vitest.
+- 2026-10-29: AI summaries are now published as `web/public/data/summaries/<dep>.json` (one per département, ~90 KB gzipped)
+  and fetched when a commune of that département is opened; `summaries.json` is gone. `uv run lsfr summarize --publish-only`
+  rewrites them from `raw/ai/summaries-cache.json` without calling Bedrock. Startup shows a loading card with MB received.
+  New filters `pop` (min) and `popmax` (max inhabitants) on every strategy, off by default (medium keeps pop ≥ 8 000 on).

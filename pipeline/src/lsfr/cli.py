@@ -51,7 +51,8 @@ def cmd_build(args: argparse.Namespace) -> None:
 def cmd_summarize(args: argparse.Namespace) -> None:
     from .summarize import summarize
 
-    summarize(OUT, RAW / "ai" / "summaries-cache.json", limit=args.limit, depts=args.depts, workers=args.workers)
+    summarize(OUT, RAW / "ai" / "summaries-cache.json", limit=args.limit, depts=args.depts, workers=args.workers,
+              publish_only=args.publish_only)
 
 
 def main() -> None:
@@ -67,6 +68,8 @@ def main() -> None:
     s.add_argument("--limit", type=int)
     s.add_argument("--depts", nargs="*", help="only these départements, e.g. --depts 33 40")
     s.add_argument("--workers", type=int, default=6, help="parallel Bedrock calls")
+    s.add_argument("--publish-only", action="store_true",
+                   help="only rewrite data/summaries/<dep>.json from the cache, no Bedrock call")
     s.set_defaults(func=cmd_summarize)
     args = p.parse_args()
     args.func(args)
