@@ -30,6 +30,21 @@ const FRANCE: Bounds = [[-4.9, 42.3], [8.3, 51.1]];
 const SRC = 'communes';
 const LAYER = 'communes'; // tippecanoe layer name
 
+const WMTS = (layer: string, style: string, set: string) =>
+  `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=${style}&FORMAT=image/png&TILEMATRIXSET=${set}&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`;
+
+/** IGN Géoplateforme background layers (free, no key), drawn under the communes. */
+export const OVERLAYS = {
+  forest: {
+    url: WMTS('IGNF_MASQUE-FORET.2021-2023', 'normal', 'PM_6_16'), minzoom: 6, maxzoom: 16, opacity: 0.85,
+    attribution: '<a href="https://geoservices.ign.fr/" target="_blank">IGN</a> Masque forêt 2021–2023',
+  },
+  relief: {
+    url: WMTS('ELEVATION.ELEVATIONGRIDCOVERAGE.SHADOW', 'estompage_grayscale', 'PM_0_15'), minzoom: 0, maxzoom: 15, opacity: 0.55,
+    attribution: '<a href="https://geoservices.ign.fr/" target="_blank">IGN</a> Estompage',
+  },
+} as const;
+
 // pmtiles:// URLs are read with HTTP range requests: only visible tiles are fetched.
 const protocol = new Protocol();
 maplibregl.addProtocol('pmtiles', protocol.tile);
@@ -57,6 +72,8 @@ export class MapView extends LitElement {
   @property({ type: Boolean }) dark = false;
   /** When set, the map zooms to these bounds (e.g. the chosen département). */
   @property({ attribute: false }) zoomTo: Bounds | null = null;
+  /** Optional background layers drawn under the communes. */
+  @property({ attribute: false }) overlays: { forest: boolean; relief: boolean } = { forest: false, relief: false };
 
   private map?: MlMap;
   private styleReady = false;
@@ -117,13 +134,16 @@ export class MapView extends LitElement {
     const m = this.map;
     if (!m || !this.styleReady || !this.tiles || m.getSource(SRC)) return;
     const abs = new URL(this.tiles, location.href).href;
+    for (const [id, o] of Object.entries(OVERLAYS)) {
+      m.addSource(id, { type: 'raster', tiles: [o.url], tileSize: 256, minzoom: o.minzoom, maxzoom: o.maxzoom, attribution: o.attribution });
+      m.addLayer({ id, type: 'raster', source: id, layout: { visibility: 'none' }, paint: { 'raster-opacity': o.opacity } });
+    }
     m.addSource(SRC, { type: 'vector', url: `pmtiles://${abs}`, promoteId: { [LAYER]: 'code' } });
     m.addLayer({
       id: 'fill', type: 'fill', source: SRC, 'source-layer': LAYER,
       paint: {
         'fill-color': ['coalesce', ['feature-state', 'color'], TIER_COLORS.fail],
-        'fill-opacity': ['case', ['boolean', ['feature-state', 'hidden'], false], 0,
-          ['boolean', ['feature-state', 'strong'], false], 0.82, 0.25],
+        'fill-opacity': this.fillOpacity(),
       },
     });
     m.addLayer({
@@ -146,7 +166,24 @@ export class MapView extends LitElement {
           ['boolean', ['feature-state', 'hover'], false], 1.5, 0],
       },
     });
+    this.applyOverlays();
     this.repaint();
+  }
+
+  /** Lighter commune colours while a background layer is shown, so it stays readable. */
+  private fillOpacity(): maplibregl.ExpressionSpecification {
+    const on = this.overlays.forest || this.overlays.relief;
+    return ['case', ['boolean', ['feature-state', 'hidden'], false], 0,
+      ['boolean', ['feature-state', 'strong'], false], on ? 0.45 : 0.82, on ? 0.08 : 0.25];
+  }
+
+  private applyOverlays() {
+    const m = this.map;
+    if (!m || !m.getLayer('fill')) return;
+    for (const id of Object.keys(OVERLAYS) as (keyof typeof OVERLAYS)[]) {
+      m.setLayoutProperty(id, 'visibility', this.overlays[id] ? 'visible' : 'none');
+    }
+    m.setPaintProperty('fill', 'fill-opacity', this.fillOpacity());
   }
 
   private repaint() {
@@ -177,6 +214,7 @@ export class MapView extends LitElement {
     }
     if (changed.has('tiles') || changed.has('departements')) this.addData();
     if (changed.has('paint') || changed.has('selected')) this.repaint();
+    if (changed.has('overlays')) this.applyOverlays();
     if (changed.has('zoomTo') && changed.get('zoomTo') !== undefined) {
       this.map.fitBounds(this.zoomTo ?? FRANCE, { padding: 20, duration: 600 });
     }

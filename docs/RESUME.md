@@ -91,3 +91,11 @@ Known limits / next:
   pesticide_breach_share, pfas_max, pfas_breach_share (+ sample counts), sis_count, polluted_site_count, casias_count,
   casias_per_km2 (build step "contamination", cached). New "Contamination" side-panel section; 5 filters on every
   strategy, all off by default (strategy-fit unchanged, AI summaries still valid).
+- 2026-10-29 nature/tourism batch: build steps "nature" (nature.py: relief from IGN BD ALTI 75 m ASC tiles in
+  raw/extra/bdalti/ -> alt_mean/min/max, relief_m = p95-p5; forest_share / forest_around_share from ESA WorldCover
+  2021 read remotely via COG overviews) and "tourism" (tourism.py: INSEE capacity 2015-2026 from
+  raw/extra/tourism/tYYYY.zip -> tour_beds_YYYY, tour_beds_change 2019->2026; census second homes 2011/16/22).
+  town3000_km/name computed in build. Map: IGN WMTS overlays (forest mask 2021-2023, shaded relief) toggled in
+  maptools. Side panel: "Tourisme : évolution" chart, sections Tourisme and Nature et relief. 5 new filters off by
+  default. Air quality: lsfr.air_fetch (Atmo France WFS ind:ind_atmo, one day at a time, ~1-2 min/day, resumable,
+  8/365 days in raw/air/) still to finish, then a build step + filter.

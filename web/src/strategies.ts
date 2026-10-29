@@ -8,7 +8,7 @@ export type PropertyType = 'house' | 'apt';
 
 export interface ColumnInfo {
   label: string;
-  unit: 'eur' | 'eur_m2' | 'eur_m2_month' | 'pct' | 'pct_raw' | 'count' | 'days' | 'bool' | 'text' | 'num' | 'density' | 'km' | 'ugl';
+  unit: 'eur' | 'eur_m2' | 'eur_m2_month' | 'pct' | 'pct_raw' | 'count' | 'days' | 'bool' | 'text' | 'num' | 'density' | 'km' | 'ugl' | 'm';
   /** What the value means. */
   def?: string;
   /** How it is calculated, and from which source. */
@@ -56,6 +56,16 @@ export const COLUMNS: Record<string, ColumnInfo> = {
     label: 'Prix sur 3 ans', unit: 'pct',
     def: 'Évolution du prix médian au m² en 3 ans, maisons et appartements confondus.',
     calc: 'médiane des ventes de 2025 comparée à la médiane des ventes de 2022. Vide s’il y a moins de 10 ventes dans l’une des deux années.',
+  },
+  price_trend_house: {
+    label: 'Prix maisons 2022→2025', unit: 'pct',
+    def: 'Évolution du prix médian au m² des maisons entre 2022 et 2025.',
+    calc: 'médiane DVF des ventes de maisons de 2025 ÷ médiane de 2022, moins 1. Vide s’il y a moins de 5 ventes l’une des deux années. 2025 encore incomplète (ventes enregistrées au 30 juin 2026).',
+  },
+  price_trend_apt: {
+    label: 'Prix appartements 2022→2025', unit: 'pct',
+    def: 'Évolution du prix médian au m² des appartements entre 2022 et 2025.',
+    calc: 'médiane DVF des ventes d’appartements de 2025 ÷ médiane de 2022, moins 1. Vide s’il y a moins de 5 ventes l’une des deux années. 2025 encore incomplète.',
   },
   land_price_m2: {
     label: 'Terrain €/m²', unit: 'eur_m2',
@@ -116,6 +126,11 @@ export const COLUMNS: Record<string, ColumnInfo> = {
     def: 'Classement national de la tension du marché du logement, de A bis (le plus tendu) à C (le moins tendu). Il sert aux aides et dispositifs comme le prêt à taux zéro.',
     calc: 'arrêté en vigueur au 26 juin 2026.',
   },
+  risk_list: {
+    label: 'Lesquels', unit: 'text',
+    def: 'Les risques comptés dans « Risques signalés ».',
+    calc: 'voir « Risques signalés ». Le détail de chaque risque est dans la suite de cette section.',
+  },
   risk_count: {
     label: 'Risques signalés', unit: 'count',
     def: 'Nombre de signaux de risque, sur 9, pour comparer rapidement les communes. Indique qu’un risque est reconnu, pas sa gravité, ni si un bien précis est exposé.',
@@ -170,6 +185,51 @@ export const COLUMNS: Record<string, ColumnInfo> = {
     label: 'Eau du robinet non conforme', unit: 'pct',
     def: 'Part des analyses d’eau du robinet de 2025 qui dépassaient une limite de qualité sanitaire (bactéries, nitrates, pesticides…), sur les réseaux qui alimentent la commune. 0 % est la norme ; quelques pour cent signalent un problème récurrent.',
     calc: 'contrôle sanitaire des Agences régionales de santé (Ministère de la Santé). Analyses dépassant une limite ÷ nombre d’analyses, tous réseaux de la commune confondus. Un dépassement ponctuel n’interdit pas toujours de boire l’eau ; l’ARS informe alors la mairie et les habitants.',
+  },
+  alt_mean: {
+    label: 'Altitude moyenne', unit: 'm',
+    def: 'Altitude moyenne du territoire de la commune.',
+    calc: 'moyenne des altitudes de la BD ALTI de l’IGN (grille de 75 m, regroupée à 150 m) à l’intérieur des limites de la commune.',
+  },
+  alt_min: { label: 'Altitude minimum', unit: 'm', def: 'Point le plus bas de la commune.', calc: 'BD ALTI IGN, grille de 150 m : la valeur exacte peut différer de quelques mètres.' },
+  alt_max: { label: 'Altitude maximum', unit: 'm', def: 'Point le plus haut de la commune.', calc: 'BD ALTI IGN, grille de 150 m : un sommet étroit peut être un peu sous-estimé.' },
+  relief_m: {
+    label: 'Dénivelé', unit: 'm',
+    def: 'Différence d’altitude entre les parties hautes et basses de la commune : le meilleur indicateur ici pour savoir si le terrain est plat ou vallonné. Repères : moins de 30 m = plat ; 100 à 300 m = collines ; plus de 500 m = montagne.',
+    calc: 'altitude dépassée par 5 % du territoire moins altitude dépassée par 95 % (BD ALTI IGN). Exclure les 5 % extrêmes évite qu’un seul pic ou une seule gorge fausse la mesure.',
+  },
+  forest_share: {
+    label: 'Forêt dans la commune', unit: 'pct',
+    def: 'Part du territoire de la commune couverte d’arbres (forêts, bois, bosquets).',
+    calc: 'carte ESA WorldCover 2021 (images satellite Sentinel, 10 m), classe « couvert arboré », lue à environ 80 m. Les vergers et les haies peuvent y être comptés.',
+  },
+  forest_around_share: {
+    label: 'Forêt autour (≈ 5 km)', unit: 'pct',
+    def: 'Part de forêt dans un rayon d’environ 5 km autour des différents points de la commune : ce que vous trouvez à portée de promenade, même si la forêt est sur la commune voisine.',
+    calc: 'ESA WorldCover 2021 : pour chaque point de la commune, part d’arbres dans un carré de 10 km de côté centré sur lui, puis moyenne sur la commune. Les surfaces en eau ne comptent pas.',
+  },
+  town3000_km: {
+    label: 'Ville de 3 000 hab. la plus proche', unit: 'km',
+    def: 'Distance jusqu’à la commune de 3 000 habitants ou plus la plus proche (0 si la commune en a elle-même 3 000 ou plus).',
+    calc: 'distance à vol d’oiseau entre les centres des communes (population INSEE 2022). Par la route, comptez environ 1,3 fois plus.',
+  },
+  town3000_name: { label: 'Ville proche (3 000 hab. +)', unit: 'text' },
+  tour_beds_change: {
+    label: 'Évolution des lits touristiques', unit: 'pct',
+    def: 'Évolution du nombre de lits touristiques entre 2019 et 2026 : une hausse signale une commune qui devient plus touristique.',
+    calc: 'INSEE, lits au 1er janvier 2026 ÷ lits au 1er janvier 2019, moins 1. Vide si la commune avait moins de 20 lits en 2019 (variation non significative). Hors meublés de particuliers.',
+  },
+  tour_beds_added: { label: 'Lits touristiques ajoutés (2019–2026)', unit: 'count', def: 'Lits touristiques en plus (ou en moins) entre 2019 et 2026.', calc: 'INSEE, lits 2026 moins lits 2019.' },
+  second_homes_2022: { label: 'Résidences secondaires', unit: 'count', def: 'Nombre de résidences secondaires et logements occasionnels en 2022.', calc: 'recensement INSEE 2022.' },
+  second_homes_change: {
+    label: 'Évolution résid. secondaires', unit: 'pct',
+    def: 'Évolution du nombre de résidences secondaires entre 2011 et 2022. Une forte hausse signale une commune qui attire de plus en plus de vacanciers, y compris par la location entre particuliers.',
+    calc: 'recensements INSEE 2011 et 2022. Vide si la commune avait moins de 10 résidences secondaires en 2011.',
+  },
+  second_home_share_change: {
+    label: 'Part résid. secondaires : évolution', unit: 'pct',
+    def: 'Évolution, en points, de la part des résidences secondaires parmi les logements entre 2011 et 2022.',
+    calc: 'part 2022 moins part 2011 (recensements INSEE). +5 % = 5 points de plus.',
   },
   pesticide_breach_share: {
     label: 'Eau : pesticides hors limite', unit: 'pct',
@@ -423,17 +483,19 @@ export const DAILY_SERVICES = ['gp', 'pharmacy', 'supermarket', 'bakery', 'prima
 export function derive(raw: Row[], type: PropertyType): Row[] {
   return raw.map((r) => {
     const n = (k: string) => (typeof r[k] === 'number' ? (r[k] as number) : null);
-    const risks = [
-      r.ppr_flood === true,
-      r.risk_marine_flood === true,
-      r.risk_forest_fire === true,
-      r.ppr_industrial === true,
-      (n('catnat_flood') ?? 0) >= 5,
-      n('radon_class') === 3,
-      (n('drought_days_avg') ?? 0) > 60,
-      (n('clay_high_share') ?? 0) > 0.5,
-      r.coast_retreat_decree === true,
-    ].filter(Boolean).length;
+    const signals: [boolean, string][] = [
+      [r.ppr_flood === true, 'plan de prévention inondation'],
+      [r.risk_marine_flood === true, 'submersion marine'],
+      [r.risk_forest_fire === true, 'feu de forêt'],
+      [r.ppr_industrial === true, 'plan de prévention des risques technologiques (site industriel)'],
+      [(n('catnat_flood') ?? 0) >= 5, `inondations répétées (${n('catnat_flood')} arrêtés de catastrophe naturelle)`],
+      [n('radon_class') === 3, 'radon (potentiel élevé)'],
+      [(n('drought_days_avg') ?? 0) > 60, `sécheresse (${Math.round(n('drought_days_avg') ?? 0)} jours de restriction d’eau par an)`],
+      [(n('clay_high_share') ?? 0) > 0.5, 'argiles (plus de la moitié de la commune en exposition forte)'],
+      [r.coast_retreat_decree === true, 'recul du trait de côte'],
+    ];
+    const hit = signals.filter(([on]) => on).map(([, l]) => l);
+    const risks = hit.length;
     const dists = DAILY_SERVICES.map((k) => n(`dist_${k}_km`)).filter((v): v is number => v !== null);
     return {
       ...r,
@@ -443,6 +505,10 @@ export function derive(raw: Row[], type: PropertyType): Row[] {
       rent_confidence: r[`rent_confidence_${type}`] ?? null,
       gross_yield: r[`gross_yield_${type}`] ?? null,
       risk_count: risks,
+      risk_list: hit.length ? hit.join(' ; ') : 'aucun',
+      // Price change 2022 -> 2025 per property type, from the yearly medians (≥ 5 sales each year).
+      price_trend_house: n('hist_house_2022') && n('hist_house_2025') ? n('hist_house_2025')! / n('hist_house_2022')! - 1 : null,
+      price_trend_apt: n('hist_apt_2022') && n('hist_apt_2025') ? n('hist_apt_2025')! / n('hist_apt_2022')! - 1 : null,
       services_km: dists.length === DAILY_SERVICES.length ? dists.reduce((a, b) => a + b, 0) / dists.length : null,
     };
   });
@@ -471,6 +537,12 @@ const CONTAMINATION_FILTERS = () => [
   f('sis', 'sis_count', 'max', 0, false),
   f('polluted', 'polluted_site_count', 'max', 0, false),
   f('casias', 'casias_per_km2', 'max', 1, false),
+  // Nature, relief and tourism trend (off by default too).
+  f('forestaround', 'forest_around_share', 'min', 0.3, false),
+  f('relief', 'relief_m', 'min', 100, false),
+  f('town', 'town3000_km', 'max', 10, false),
+  f('tourgrowth', 'tour_beds_change', 'min', 0.05, false),
+  f('shgrowth', 'second_homes_change', 'min', 0.1, false),
 ];
 
 export const STRATEGIES: Strategy[] = [
@@ -745,6 +817,26 @@ export const FILTERS: Record<string, { label: string; help: string }> = {
     label: 'Secteurs de sols pollués (SIS) max.',
     help: 'Élimine les communes qui ont plus que ce nombre de secteurs d’information sur les sols, c’est-à-dire de terrains où une pollution est connue de l’État. Avec 0 : aucune commune ayant un tel terrain.',
   },
+  forestaround: {
+    label: 'Forêt autour minimum (%)',
+    help: 'Garde les communes où au moins ce pourcentage du territoire dans un rayon d’environ 5 km est couvert d’arbres : des bois à portée de promenade.',
+  },
+  relief: {
+    label: 'Dénivelé minimum (m)',
+    help: 'Garde les communes vallonnées ou montagneuses : la différence d’altitude entre leurs parties hautes et basses dépasse ce nombre de mètres. Repères : 100 m = collines, 300 m = moyenne montagne.',
+  },
+  town: {
+    label: 'Ville de 3 000 hab. à max. (km)',
+    help: 'Garde les communes situées à moins de cette distance (à vol d’oiseau) d’une commune d’au moins 3 000 habitants, ou qui en ont elles-mêmes 3 000.',
+  },
+  tourgrowth: {
+    label: 'Hausse des lits touristiques min. (%)',
+    help: 'Garde les communes dont le nombre de lits touristiques (hôtels, campings, résidences) a augmenté d’au moins ce pourcentage entre 2019 et 2026. Les communes avec moins de 20 lits en 2019 n’ont pas de valeur et passent ce filtre.',
+  },
+  shgrowth: {
+    label: 'Hausse des résid. secondaires min. (%)',
+    help: 'Garde les communes dont le nombre de résidences secondaires a augmenté d’au moins ce pourcentage entre 2011 et 2022 : un signe qu’elles attirent de plus en plus de vacanciers.',
+  },
   polluted: {
     label: 'Sites de sols pollués suivis max.',
     help: 'Élimine les communes ayant plus que ce nombre de sites dont la pollution des sols est connue et suivie par l’État (ancienne base BASOL). Avec 0 : aucune commune ayant un tel site.',
@@ -796,22 +888,26 @@ export const SIGNALS: Record<string, { label: string; help: string }> = {
 
 /** Sections of the side panel. Columns missing from COLUMNS are skipped. */
 export const DETAIL_GROUPS: { title: string; help?: string; columns: string[] }[] = [
-  { title: 'Marché', columns: ['price_m2', 'n_sales', 'price_trend_3y', 'rent_m2', 'rent_confidence', 'gross_yield', 'net_yield', 'cashflow_month', 'land_price_m2', 'n_land_sales'] },
+  { title: 'Marché', columns: ['price_m2', 'n_sales', 'price_trend_3y', 'price_trend_house', 'price_trend_apt', 'rent_m2', 'rent_confidence', 'gross_yield', 'net_yield', 'cashflow_month', 'land_price_m2', 'n_land_sales'] },
   { title: 'Demande locative', columns: ['tenant_share', 'private_rent_share', 'furnished_share', 'social_share', 'unemployment_rate', 'jobs', 'jobs_per_active', 'students', 'students_per_1000'] },
   { title: 'Énergie des logements', columns: ['dpe_fg_share', 'dpe_g_share', 'dpe_count'] },
-  { title: 'Habitants', columns: ['pop', 'pop_cagr_11y', 'density', 'median_income', 'vacancy_rate', 'second_home_share', 'tourist_beds_per_1000', 'aav_category', 'aav_name', 'aav_size'] },
+  { title: 'Habitants', columns: ['pop', 'pop_cagr_11y', 'density', 'median_income', 'vacancy_rate', 'town3000_km', 'town3000_name', 'aav_category', 'aav_name', 'aav_size'] },
+  { title: 'Tourisme', columns: ['tourist_beds_per_1000', 'tour_beds_change', 'tour_beds_added', 'second_home_share', 'second_homes_2022', 'second_homes_change', 'second_home_share_change'] },
+  { title: 'Nature et relief', help: 'Forêt : ESA WorldCover 2021. Altitudes : BD ALTI de l’IGN. Affichez aussi les forêts et le relief sur la carte avec les boutons au-dessus.', columns: ['forest_around_share', 'forest_share', 'relief_m', 'alt_mean', 'alt_min', 'alt_max'] },
   { title: 'Santé et services', help: 'Distances à vol d’oiseau jusqu’à la commune la plus proche qui a le service ; 0 km = dans la commune.', columns: ['apl_gp', 'apl_gp_65', 'gp_count', 'services_km', 'dist_gp_km', 'dist_pharmacy_km', 'dist_supermarket_km', 'dist_bakery_km', 'dist_primary_school_km', 'dist_college_km', 'dist_lycee_km', 'dist_post_km', 'dist_emergency_km', 'dist_train_km', 'fibre_share'] },
   { title: 'Sécurité', help: 'Faits enregistrés par la police et la gendarmerie en 2025. Une commune touristique ou un pôle commercial a mécaniquement plus de faits par habitant (visiteurs non comptés dans la population).', columns: ['crime_burglary', 'crime_violence', 'crime_damage', 'crime_theft', 'crime_estimated'] },
   { title: 'Écoles', columns: ['college_ips', 'college_ips_km', 'lycee_success', 'lycee_value_added', 'lycee_success_km'] },
   { title: 'Eau', columns: ['drinking_water_days_avg', 'drought_days_avg', 'crisis_days_avg', 'water_limit_breach_share'] },
   { title: 'Contamination', help: 'Eau du robinet (analyses 2025 des ARS) et inventaires des sols pollués (Géorisques). Pour un potager ou des poules, ces chiffres signalent une commune à vigilance ; seule une analyse de sol de votre terrain dit s’il est pollué.', columns: ['pesticide_breach_share', 'pesticide_samples', 'pfas_max', 'pfas_breach_share', 'pfas_samples', 'sis_count', 'polluted_site_count', 'casias_count', 'casias_per_km2'] },
-  { title: 'Sols, côte et risques', columns: ['risk_count', 'clay_high_share', 'clay_med_high_share', 'catnat_drought', 'ppr_flood', 'catnat_flood', 'risk_marine_flood', 'coast_retreat_decree', 'risk_coast_erosion', 'risk_forest_fire', 'ppr_industrial', 'radon_class'] },
+  { title: 'Sols, côte et risques', columns: ['risk_count', 'risk_list', 'clay_high_share', 'clay_med_high_share', 'catnat_drought', 'ppr_flood', 'catnat_flood', 'risk_marine_flood', 'coast_retreat_decree', 'risk_coast_erosion', 'risk_forest_fire', 'ppr_industrial', 'radon_class'] },
   { title: 'Fiscalité et règles', columns: ['tfpb_rate', 'tfpb_total_avg_eur', 'second_home_surcharge', 'zone_tendue', 'zone_abc'] },
 ];
 
 
 export const HELP = {
   finance: 'Le rendement net et le cash-flow sont calculés pour chaque commune avec ces hypothèses, à partir du prix médian au m² (DVF), du loyer estimé (ANIL) et de la taxe foncière moyenne de la commune.\n\nC’est une estimation pour comparer les communes, pas une simulation bancaire : impôt sur le revenu, assurance emprunteur, travaux et frais de garantie ne sont pas comptés. Les hypothèses sont enregistrées dans le lien de partage.',
+  tourism: 'Barres : nombre de lits touristiques recensés chaque année par l’INSEE (au 1er janvier), de 2015 à 2026. Calcul INSEE : une chambre d’hôtel = 2 lits, un emplacement de camping = 3 lits, plus les lits des villages vacances, résidences de tourisme et auberges de jeunesse.\n\nLes meublés de tourisme de particuliers (type Airbnb) ne sont pas comptés : une commune qui devient touristique par la location entre particuliers se voit plutôt à la hausse de ses résidences secondaires (recensements 2011, 2016, 2022).',
+  overlays: 'Fonds de carte de l’IGN, superposés aux communes (dont les couleurs s’éclaircissent pour rester lisibles).\n\nForêts : masque forêt IGN 2021–2023, visible à partir du zoom régional.\nRelief : relief ombré (estompage) issu des altitudes de l’IGN.\n\nPour filtrer, utilisez « Forêt autour » et « Dénivelé » dans les filtres.',
   history: 'Prix médian au m² des ventes de maisons et d’appartements, et nombre de ventes, par année de vente (DVF, ventes d’un seul logement). Plus il y a de ventes, plus la médiane est fiable.',
   scope: 'Sans sélection : toute la France, les communes sont comparées à l’échelle nationale.\n\nAvec un ou plusieurs départements : la carte et le tableau ne montrent que leurs communes, et le score, les groupes A à E et les médianes sont recalculés en ne comparant que ces communes entre elles. La sélection est enregistrée dans le lien de partage.',
   filters: 'Un filtre élimine les communes qui ne respectent pas la condition. Décochez-le pour le désactiver.\n\nLe nombre en rouge indique combien de communes ce filtre élimine (une même commune peut être éliminée par plusieurs filtres).',

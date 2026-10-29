@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing, svg } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
-import { compareScore, evaluate, num, type FilterDef, type Row, type Scored, type SignalDef } from '../engine';
+import { compareScore, evaluate, num, type FilterDef, type Row, type Scored, type SignalDef, type Tier } from '../engine';
 import { CSV_SEP, csvValue, fmt } from '../format';
 import { VERDICT_LABEL, judge, type Verdict } from '../judge';
 import { DEFAULT_FINANCE, REFERENCE_SURFACE, decodeFinance, encodeFinance, simulate, withFinance, type Finance } from '../finance';
@@ -9,10 +9,14 @@ import {
   COLUMNS, DETAIL_GROUPS, FILTERS, HELP, SIGNALS, STRATEGIES, columnHelp, derive, missingDataNote, preset,
   type PropertyType, type StrategyId,
 } from '../strategies';
-import { decode, encode } from '../url';
+import { customFilter, decode, encode } from '../url';
+import { adLinks, firstPostcode } from '../links';
 import { TIER_COLORS, type Bounds, type MapView, type Paint } from './map-view';
 import './map-view';
 import './info-tip';
+import './ai-chat';
+import type { ChatHost } from './ai-chat';
+import { planFilters, type Plan } from '../ai/plan';
 
 interface Meta {
   built: string;
@@ -96,6 +100,10 @@ export class AppRoot extends LitElement {
   @state() private strategy: StrategyId = 'long';
   @state() private type: PropertyType = 'house';
   @state() private filters: FilterDef[] = [];
+  /** Free-form filters on any column, kept across strategy changes. */
+  @state() private custom: FilterDef[] = [];
+  /** Keep only these score groups (empty = all). Applied after scoring, so groups keep their meaning. */
+  @state() private tiers: Tier[] = [];
   @state() private signals: SignalDef[] = [];
   @state() private selected: string | null = null;
   @state() private sort: SortKey = null;
@@ -105,6 +113,8 @@ export class AppRoot extends LitElement {
   @state() private mapFull = false;
   @state() private finance: Finance = { ...DEFAULT_FINANCE };
   @state() private colorBy = 'score';
+  /** Background map layers (IGN forest mask, shaded relief). */
+  @state() private overlays = { forest: false, relief: false };
   @state() private greyFailing = true;
   @state() private columns: string[] = [];
   @state() private theme: 'auto' | 'light' | 'dark' = 'auto';
@@ -224,12 +234,14 @@ export class AppRoot extends LitElement {
     this.selected = s.selected;
     this.scopes = s.scopes ?? [];
     this.finance = decodeFinance(s.finance ?? null);
+    this.custom = s.custom ?? [];
+    this.tiers = s.tiers ?? [];
     this.columns = defaultColumns(s.strategy);
   }
 
   private pushUrl() {
     const h = encode({
-      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance),
+      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom, tiers: this.tiers,
     });
     history.replaceState(null, '', `#${h}`);
   }
@@ -314,6 +326,114 @@ export class AppRoot extends LitElement {
     this.pushUrl();
   }
 
+  /** Add or replace a free-form filter (one per column and operator). */
+  addCustom(column: string, op: FilterDef['op'], value?: number) {
+    const f = customFilter(column, op, value);
+    this.custom = [...this.custom.filter((x) => x.id !== f.id), f];
+    this.shown = PAGE;
+    this.pushUrl();
+  }
+
+  removeCustom(id: string) {
+    this.custom = this.custom.filter((x) => x.id !== id);
+    this.pushUrl();
+  }
+
+  /** Width of the assistant docked on the left (0 = floating or closed); the page shifts right by it. */
+  @state() private chatWidth = 0;
+
+  private setChatWidth(w: number) {
+    this.chatWidth = w;
+    this.style.setProperty('--chat-w', `${w}px`);
+    // The map's canvas must follow the new size.
+    requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+  }
+
+  /** Bridge for the assistant: it only ever goes through these functions. */
+  private chatHost: ChatHost = {
+    applyPlan: (plan: Plan) => this.applyPlan(plan),
+    facts: (context: string) => this.chatFacts(context),
+    openCommune: (code: string) => {
+      // A commune outside the chosen départements has no panel: widen to all of France first.
+      if (!this.results.some((r) => r.row.code === code)) this.setScopes([]);
+      this.select(code, true);
+    },
+  };
+
+  private applyPlan(plan: Plan): { applied: string[]; dropped: string[] } {
+    const applied: string[] = [];
+    if (plan.strategy && plan.strategy !== this.strategy) {
+      this.setStrategy(plan.strategy);
+      applied.push(STRATEGIES.find((s) => s.id === plan.strategy)!.label);
+    }
+    const dropped: string[] = [];
+    if (plan.departements) {
+      const codes: string[] = [];
+      for (const d of plan.departements) {
+        const q = fold(d.trim());
+        const code = /^(\d{2}|2[ab])$/i.test(q) ? q.toUpperCase()
+          : Object.entries(this.depNames).find(([, n]) => fold(n) === q)?.[0];
+        if (code && code in this.depNames) codes.push(code); else dropped.push(d);
+      }
+      if (codes.length || !plan.departements.length) {
+        this.setScopes(codes);
+        applied.push(codes.length ? this.scopeLabel : 'Toute la France');
+      }
+    }
+    if (plan.reset_filters) { this.custom = []; this.tiers = []; }
+    if (plan.tiers?.length) {
+      this.tiers = [...new Set(plan.tiers)].sort() as Tier[];
+      applied.push(`Groupes ${this.tiers.join(', ')}`);
+    }
+    const { filters, dropped: badCols } = planFilters(plan);
+    dropped.push(...badCols);
+    if (filters.length) {
+      const ids = new Set(filters.map((f) => f.id));
+      this.custom = [...this.custom.filter((x) => !ids.has(x.id)), ...filters];
+      applied.push(...filters.map((f) => this.filterChip(f)));
+    }
+    if (plan.color_by && plan.color_by in COLUMNS && !['bool', 'text'].includes(COLUMNS[plan.color_by].unit)) {
+      this.colorBy = plan.color_by;
+      applied.push(`Carte : ${COLUMNS[plan.color_by].label}`);
+    }
+    if (plan.forest_layer !== null || plan.relief_layer !== null) {
+      this.overlays = { forest: plan.forest_layer ?? this.overlays.forest, relief: plan.relief_layer ?? this.overlays.relief };
+      if (plan.forest_layer !== null) applied.push(plan.forest_layer ? 'Forêts affichées' : 'Forêts masquées');
+      if (plan.relief_layer !== null) applied.push(plan.relief_layer ? 'Relief affiché' : 'Relief masqué');
+    }
+    this.showFailing = false;
+    this.sort = null;
+    this.shown = PAGE;
+    this.pushUrl();
+    return { applied, dropped };
+  }
+
+  /**
+   * Facts for the model: the best communes now shown, plus any commune named in the conversation
+   * (so a follow-up like "what is Roubaix's risk?" gets Roubaix's data), with the values the user filtered on.
+   */
+  private chatFacts(context = ''): { count: number; text: string; communes: { code: string; nom: string; ads: { label: string; url: string }[] }[] } {
+    const passing = this.results.filter((r) => r.pass).sort(compareScore);
+    const cols = [...new Set([...this.custom.map((f) => f.column), 'pop', 'town3000_name', 'town3000_km', 'price_m2', 'risk_count', 'risk_list'])]
+      .filter((c) => c in COLUMNS).slice(0, 14);
+    const line = (row: Row, extra: string[] = []) => {
+      const dep = this.depNames[row.dep as string] ?? row.dep;
+      const vals = [...new Set([...cols, ...extra])].map((c) => `${COLUMNS[c]?.label ?? c} ${fmt(c, row[c])}`).join(' ; ');
+      return `- ${row.nom} (${dep}, code INSEE ${row.code}, code postal ${row.postcodes ?? '?'}) : ${vals}`;
+    };
+    // Communes named in the question or the previous exchange (whole-word match, names of 4+ letters).
+    const ctx = ` ${fold(context)} `;
+    const named = context ? this.rows.filter((r) => r.nom.length >= 4 && ctx.includes(` ${fold(r.nom)} `)).slice(0, 5) : [];
+    const detail = ['risk_list', 'catnat_flood', 'ppr_flood', 'risk_forest_fire', 'radon_class', 'clay_high_share', 'pfas_max',
+      'pesticide_breach_share', 'sis_count', 'forest_around_share', 'relief_m', 'tour_beds_change', 'second_homes_change',
+      'median_income', 'apl_gp', 'crime_burglary', 'pop_cagr_11y'];
+    const parts = [`${passing.length} communes retenues par les critères actuels. Les meilleures :`, ...passing.slice(0, 8).map((r) => line(r.row))];
+    if (named.length) parts.push('', 'Communes citées dans la conversation (détail) :', ...named.map((r) => line(r, detail)));
+    // Names the answer may cite: the communes listed for the model, plus the next best ones it may mention.
+    const communes = [...passing.slice(0, 40).map((r) => r.row), ...named].map((r) => ({ code: r.code, nom: r.nom, ads: adLinks(r) }));
+    return { count: passing.length + named.length, text: parts.join('\n'), communes };
+  }
+
   private updateSignal(id: string, weight: number) {
     this.signals = this.signals.map((s) => (s.id === id ? { ...s, weight } : s));
     this.pushUrl();
@@ -331,7 +451,7 @@ export class AppRoot extends LitElement {
   // ------------------------------------------------------------ derived
   // 35 000 communes: derive/evaluate are cached and only recomputed when their inputs change.
   private _rows?: { raw: Row[]; type: PropertyType; finance: Finance; out: Row[] };
-  private _res?: { rows: Row[]; scope: string; filters: FilterDef[]; signals: SignalDef[]; out: Scored[] };
+  private _res?: { rows: Row[]; scope: string; filters: FilterDef[]; custom: FilterDef[]; tiers: Tier[]; signals: SignalDef[]; out: Scored[] };
 
   private get rows(): Row[] {
     const c = this._rows;
@@ -346,11 +466,15 @@ export class AppRoot extends LitElement {
     const rows = this.rows;
     const c = this._res;
     const key = this.scopes.join(',');
-    if (c && c.rows === rows && c.scope === key && c.filters === this.filters && c.signals === this.signals) return c.out;
+    if (c && c.rows === rows && c.scope === key && c.filters === this.filters && c.custom === this.custom && c.tiers === this.tiers && c.signals === this.signals) return c.out;
     const set = new Set(this.scopes);
     const inScope = set.size ? rows.filter((r) => set.has(r.dep as string)) : rows;
-    const out = evaluate(inScope, this.filters, this.signals);
-    this._res = { rows, scope: key, filters: this.filters, signals: this.signals, out };
+    let out = evaluate(inScope, [...this.filters, ...this.custom], this.signals);
+    if (this.tiers.length) {
+      const keep = new Set(this.tiers);
+      out = out.map((r) => (r.pass && !keep.has(r.tier!) ? { ...r, pass: false, failed: ['tiers'] } : r));
+    }
+    this._res = { rows, scope: key, filters: this.filters, custom: this.custom, tiers: this.tiers, signals: this.signals, out };
     return out;
   }
 
@@ -390,7 +514,9 @@ export class AppRoot extends LitElement {
     let list = this.showFailing ? [...results] : results.filter((r) => r.pass);
     if (this.search.trim()) {
       const q = fold(this.search.trim());
-      list = list.filter((r) => fold(r.row.nom).includes(q) || r.row.code.startsWith(q));
+      // Name, INSEE code, or postal code ("33700" finds Mérignac).
+      list = list.filter((r) => fold(r.row.nom).includes(q) || r.row.code.startsWith(q)
+        || (/^\d{2,5}$/.test(q) && typeof r.row.postcodes === 'string' && r.row.postcodes.split(' ').some((p) => p.startsWith(q))));
     }
     const s = this.sort;
     if (!s) {
@@ -489,7 +615,7 @@ export class AppRoot extends LitElement {
         </div>
       </header>
 
-      <div class="layout ${sel ? 'has-detail' : ''}">
+      <div class="layout ${sel ? 'has-detail' : ''} ${this.chatWidth ? 'chat-docked' : ''}">
         <main>
           <section class="summary" aria-label="Réglages actifs">
             <div class="summary-text">
@@ -503,6 +629,10 @@ export class AppRoot extends LitElement {
                         ${t === 'house' ? 'Maison' : 'Appartement'}</button>`)}
                   </div>${tip('Type de bien', HELP.type)}` : nothing}
                 ${active.map((f) => html`<span class="chip">${this.filterChip(f)}</span>`)}
+                ${this.custom.length + this.tiers.length > 1 ? html`<button class="chip clear" @click=${() => { this.custom = []; this.tiers = []; this.pushUrl(); }}
+                  title="Retirer tous les filtres ajoutés (en vert)">Effacer les filtres ajoutés ×</button>` : nothing}
+                ${this.tiers.length ? html`<span class="chip custom" title="Filtre ajouté">Groupes ${this.tiers.join(', ')}<button aria-label="Retirer le filtre sur les groupes" @click=${() => { this.tiers = []; this.pushUrl(); }}>×</button></span>` : nothing}
+                ${this.custom.map((f) => html`<span class="chip custom" title="Filtre ajouté">${this.filterChip(f)}<button aria-label="Retirer le filtre ${this.filterChip(f)}" @click=${() => this.removeCustom(f.id)}>×</button></span>`)}
               </div>
             </div>
             <button class="btn primary" @click=${() => (this.settingsOpen = true)} aria-haspopup="dialog">
@@ -535,6 +665,7 @@ export class AppRoot extends LitElement {
       </div>
 
       ${this.settingsOpen ? this.renderSettings(results, st.label) : nothing}
+      ${this.raw.length ? html`<ai-chat .host=${this.chatHost} @chat-dock=${(e: CustomEvent<{ width: number }>) => this.setChatWidth(e.detail.width)}></ai-chat>` : nothing}
       ${this.loadingMb !== null ? html`
         <div class="loading" role="status" aria-live="polite">
           <span class="spinner" aria-hidden="true"></span>
@@ -648,6 +779,12 @@ export class AppRoot extends LitElement {
           ${this.colorBy !== 'score' ? html`${colTip(this.colorBy)}
             <label class="switchlabel"><input class="switch" type="checkbox" .checked=${this.greyFailing}
               @change=${(e: Event) => (this.greyFailing = (e.target as HTMLInputElement).checked)}> Griser les communes éliminées</label>` : nothing}
+          <div class="seg" role="group" aria-label="Fonds de carte">
+            ${([['forest', 'Forêts', 'Afficher les forêts (IGN, masque forêt 2021–2023). Visible à partir du zoom régional.'],
+                ['relief', 'Relief', 'Afficher le relief ombré (IGN, estompage)']] as const).map(([k, l, title]) => html`
+              <button aria-pressed=${this.overlays[k] ? 'true' : 'false'} class=${this.overlays[k] ? 'on' : ''} title=${title}
+                @click=${() => (this.overlays = { ...this.overlays, [k]: !this.overlays[k] })}>${l}</button>`)}
+          </div>${tip('Forêts et relief', HELP.overlays)}
           <span class="grow"></span>
           <span class="hint">Cliquez une commune pour son détail</span>
           <button class="btn icon" @click=${() => this.setMapFull(!this.mapFull)}
@@ -659,7 +796,7 @@ export class AppRoot extends LitElement {
         </div>
         <div class="mapwrap">
           <map-view .tiles=${'./data/communes.pmtiles'} .departements=${this.departements} .zoomTo=${this.zoomTo}
-            .paint=${paint} .selected=${this.selected} .dark=${this.dark}
+            .paint=${paint} .selected=${this.selected} .dark=${this.dark} .overlays=${this.overlays}
             @select=${(e: CustomEvent<string>) => this.select(e.detail)}></map-view>
           ${this.renderScale(label, scale)}
         </div>
@@ -838,6 +975,9 @@ export class AppRoot extends LitElement {
             <div>
               <h3>${row.nom}</h3>
               <small>${fmt('pop', row.pop)} habitants · ${row.aav_category ?? ''}</small>
+              ${row.postcodes ? html`<small class="cp" title="Codes postaux">${String(row.postcodes).split(' ').length > 4
+                ? `${String(row.postcodes).split(' ').slice(0, 3).join(', ')}… (${String(row.postcodes).split(' ').length} codes postaux)`
+                : String(row.postcodes).split(' ').join(', ')}</small>` : nothing}
             </div>
           </div>
           <button class="close" aria-label="Fermer le panneau" title="Fermer (Échap)" @click=${() => this.select(null)}>×</button>
@@ -848,7 +988,7 @@ export class AppRoot extends LitElement {
                 <div><span class="label">Score ${tip('Score', HELP.score)}</span><b>${fmt('score', r.score)}</b><small>/100</small></div>
                 <div><span class="label">Groupe ${tip('Groupe', HELP.tier)}</span><b>${r.tier}</b></div>
               </div>`
-            : html`<p class="failbox">Éliminée par : ${r.failed.map((f) => FILTERS[f]?.label ?? f).join(', ')}</p>`}
+            : html`<p class="failbox">Éliminée par : ${r.failed.map((f) => f === 'tiers' ? `groupe ${r.tier ?? ''} hors des groupes ${this.tiers.join(', ')}` : FILTERS[f]?.label ?? this.filterChip([...this.custom].find((c) => c.id === f) ?? { id: f, column: f, op: 'min', enabled: true })).join(', ')}</p>`}
 
           ${this.summaries[row.code] ? html`
             <section class="ai" aria-label="Résumé IA">
@@ -882,9 +1022,15 @@ export class AppRoot extends LitElement {
               })}</div>
             </details>` : nothing}
 
+          ${adLinks(row).length ? html`
+            <div class="ads">
+              <span class="label">Annonces leboncoin${tip('Annonces', 'Liens vers une recherche leboncoin sur cette commune (code postal ' + (firstPostcode(row) ?? '') + '), ouverte dans un nouvel onglet. Les liens sont construits par l’application ; leboncoin peut changer le format de ses adresses.')}</span>
+              ${adLinks(row).map((l) => html`<a href=${l.url} target="_blank" rel="noopener noreferrer">${l.label} ↗</a>`)}
+            </div>` : nothing}
           ${this.detailWarnings(row)}
           ${this.renderSimulation(row)}
           ${this.renderHistory(row)}
+          ${this.renderTourism(row)}
 
           ${DETAIL_GROUPS.map((g) => html`
             <details open class="grp">
@@ -962,6 +1108,40 @@ export class AppRoot extends LitElement {
           <dt><b>Cash-flow mensuel</b>${colTip('cashflow_month')}</dt><dd>${val('cashflow_month', Math.round(sim.cashflowMonth))}</dd>
         </dl>
         <p class="muted small">Avant impôt sur le revenu et assurance emprunteur. Le loyer ANIL est charges comprises : le revenu réel est un peu plus bas.</p>
+      </details>`;
+  }
+
+  /** Tourist beds per year (INSEE 2015–2026) as bars, and second homes at the last three censuses. */
+  private renderTourism(row: Row) {
+    const years = Array.from({ length: 12 }, (_, i) => String(2015 + i));
+    const beds = years.map((y) => num(row[`tour_beds_${y}`]) ?? 0);
+    const homes = [['2011', num(row.second_homes_2011)], ['2016', num(row.second_homes_2016)], ['2022', num(row.second_homes_2022)]] as const;
+    if (!beds.some((b) => b > 0) && !homes.some(([, v]) => (v ?? 0) > 0)) return nothing;
+    const W = 300, H = 110, padL = 40, padB = 16, padT = 8;
+    const max = Math.max(1, ...beds);
+    const bw = (W - padL) / years.length;
+    const y = (v: number) => padT + (H - padT - padB) * (1 - v / max);
+    const int = (v: number) => Math.round(v).toLocaleString('fr-FR');
+    return html`
+      <details open class="grp">
+        <summary>Tourisme : évolution${tip('Tourisme : évolution', HELP.tourism)}</summary>
+        ${beds.some((b) => b > 0) ? html`
+        <svg class="hist" viewBox="0 0 ${W} ${H}" role="img" aria-label="Lits touristiques par an, 2015 à 2026">
+          ${[0, max / 2, max].map((v) => svg`<text x=${padL - 4} y=${y(v) + 3} text-anchor="end" class="ax">${int(v)}</text>
+            <line x1=${padL} x2=${W} y1=${y(v)} y2=${y(v)} class="grid"></line>`)}
+          ${beds.map((b, i) => svg`<rect x=${padL + i * bw + bw * 0.15} width=${bw * 0.7} y=${y(b)} height=${H - padB - y(b)}
+            fill="var(--brand-2)" opacity="0.75"><title>${years[i]} : ${int(b)} lits touristiques</title></rect>`)}
+          ${years.map((yy, i) => (i % 2 === 0 || i === years.length - 1)
+            ? svg`<text x=${padL + (i + 0.5) * bw} y=${H - 3} text-anchor="middle" class="ax">${yy.slice(2)}</text>` : nothing)}
+        </svg>
+        <div class="legendrow"><span><i style="background:var(--brand-2)"></i>Lits touristiques (hôtels, campings, résidences, villages vacances), 2015–2026</span></div>`
+        : html`<p class="muted small">Aucun hôtel, camping, village vacances ni résidence de tourisme recensé par l’INSEE dans la commune entre 2015 et 2026 (c’est le cas de 7 communes sur 10, surtout des villages). Les gîtes et meublés de particuliers ne sont pas comptés : regardez plutôt l’évolution des résidences secondaires ci-dessous.</p>`}
+        <dl class="kv">
+          <dt>Résidences secondaires ${homes.map(([yy]) => yy).join(' / ')}${colTip('second_homes_change')}</dt>
+          <dd>${homes.map(([, v]) => (v === null ? '—' : int(v))).join(' / ')}</dd>
+          <dt>Évolution des lits 2019 → 2026${colTip('tour_beds_change')}</dt><dd>${val('tour_beds_change', row.tour_beds_change)}</dd>
+          <dt>Évolution résid. secondaires 2011 → 2022</dt><dd>${val('second_homes_change', row.second_homes_change)}</dd>
+        </dl>
       </details>`;
   }
 
@@ -1066,6 +1246,9 @@ export class AppRoot extends LitElement {
     /* ---- layout ---- */
     .layout { display: grid; grid-template-columns: minmax(0, 1fr); }
     .layout.has-detail { grid-template-columns: minmax(0, 1fr) 400px; }
+    /* Docked assistant: the page (and the expanded map) start right of it. */
+    .layout.chat-docked { margin-left: var(--chat-w, 0px); }
+    .layout.chat-docked .mapcard.full { left: var(--chat-w, 0px); }
     main { padding: 18px 22px 30px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
     /* ---- summary of active settings ---- */
@@ -1073,6 +1256,11 @@ export class AppRoot extends LitElement {
     .summary-text p { margin: 0 0 10px; color: var(--muted); max-width: 820px; font-size: 14.5px; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .chip { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; color: var(--ink-2); }
+    .chip.custom { border-color: var(--brand-2); background: var(--brand-soft); display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
+    .chip.custom button { border: 0; background: transparent; color: var(--brand-2); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 5px; border-radius: 999px; }
+    .chip.custom button:hover { background: var(--surface); }
+    .chip.clear { cursor: pointer; font: inherit; font-size: 12.5px; color: var(--brand-2); border-style: dashed; }
+    .chip.clear:hover { background: var(--brand-soft); }
     .seg { display: inline-flex; background: var(--seg-bg); border-radius: 999px; padding: 3px; margin-right: 2px; }
     .seg button { border: 0; background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--muted); font-weight: 500; }
     .seg button.on { background: var(--surface); color: var(--brand); font-weight: 650; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
@@ -1226,6 +1414,11 @@ export class AppRoot extends LitElement {
     .sn-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 16px 18px 14px; border-bottom: 1px solid var(--line); }
     .sn-title { display: flex; align-items: center; gap: 12px; }
     .sn-head h3 { margin: 0; font-size: 20px; letter-spacing: -.02em; } .sn-head small { color: var(--muted); }
+    .sn-head small.cp { display: block; margin-top: 2px; }
+    .ads { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); font-size: 12.5px; }
+    .ads .label { display: inline-flex; align-items: center; font-weight: 650; color: var(--ink-2); width: 100%; }
+    .ads a { color: var(--brand-2); text-decoration: none; font-weight: 600; }
+    .ads a:hover { text-decoration: underline; }
     .sn-body { overflow-y: auto; padding: 14px 18px 30px; display: flex; flex-direction: column; gap: 12px; }
     .sn-score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .sn-score > div { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }

@@ -16,7 +16,7 @@ from pathlib import Path
 import polars as pl
 from shapely.geometry import mapping, shape
 
-from . import contamination, demand, dvf, living, vigieau
+from . import contamination, demand, dvf, living, nature, tourism, vigieau
 from .cog import load_crosswalk, remap
 from .sources import DEPTS, DIS_2025, DVF_YEARS, SOURCES, dep_dir
 
@@ -307,7 +307,7 @@ def contamination_themes(raw: Path, x: dict) -> dict[str, pl.DataFrame]:
 
 
 # Heavy steps cached as parquet in raw/build/ (delete theme-<step>.json to recompute one).
-CACHED = ("dvf", "drought", "living", "demand", "contamination")
+CACHED = ("dvf", "drought", "living", "demand", "contamination", "nature", "tourism")
 
 # ---------------------------------------------------------------- assemble
 COLUMNS = {
@@ -377,6 +377,20 @@ COLUMNS = {
     "pfas_samples": ("count", "2025 tap-water samples analysed for the sum of 20 PFAS"),
     "pfas_max": ("µg/L", "Highest sum of 20 PFAS measured in 2025 (limit 0.1 µg/L)"),
     "pfas_breach_share": ("ratio", "Share of PFAS samples over 0.1 µg/L"),
+    "alt_mean": ("m", "Mean altitude (IGN BD ALTI 75 m, averaged to 150 m)"),
+    "alt_min": ("m", "Lowest altitude in the commune"),
+    "alt_max": ("m", "Highest altitude in the commune"),
+    "relief_m": ("m", "Relief: 95th minus 5th percentile of altitude"),
+    "forest_share": ("ratio", "Share of land under tree cover (ESA WorldCover 2021)"),
+    "forest_around_share": ("ratio", "Share of tree cover within ~5 km (ESA WorldCover 2021)"),
+    "town3000_km": ("km", "Distance to the nearest commune of 3,000+ residents (0 = itself)"),
+    "town3000_name": ("text", "Nearest commune of 3,000+ residents"),
+    "postcodes": ("text", "Postal codes of the commune, space-separated (geo.api.gouv.fr)"),
+    "tour_beds_change": ("ratio", "Change in tourist beds 2019 -> 2026 (INSEE)"),
+    "tour_beds_added": ("beds", "Tourist beds added 2019 -> 2026"),
+    "second_homes_2022": ("count", "Second homes 2022"),
+    "second_homes_change": ("ratio", "Change in second homes 2011 -> 2022"),
+    "second_home_share_change": ("ratio", "Change in second-home share of dwellings 2011 -> 2022 (points)"),
     "casias_count": ("count", "CASIAS former industrial / service sites (Géorisques)"),
     "casias_per_km2": ("sites/km²", "CASIAS sites per km²"),
     "polluted_site_count": ("count", "Sites with known soil pollution under State action (ex-BASOL)"),
@@ -430,6 +444,11 @@ def build(raw: Path, out: Path) -> None:
         ("living", lambda: living_themes(raw, x, base, feats)),
         ("demand", lambda: demand_themes(raw, x, base)),
         ("contamination", lambda: contamination_themes(raw, x)),
+        ("nature", lambda: {"relief": nature.relief(raw / "extra" / "bdalti", feats), "forest": nature.forest(feats)}),
+        ("tourism", lambda: {
+            "tourism_history": tourism.capacity_history(raw / "extra" / "tourism", DEPTS, x),
+            "second_homes": tourism.second_homes(raw / "serie-historique-2022.zip", DEPTS, x),
+        }),
     ]
     for name, fn in steps:
         t = time.time()
@@ -466,6 +485,14 @@ def build(raw: Path, out: Path) -> None:
     )
     if "casias_count" in df.columns:  # area (km²) = population / density
         df = df.with_columns((pl.col("casias_count") * pl.col("density") / pl.col("pop")).alias("casias_per_km2"))
+    df = df.join(nature.nearest_town(df), on="code", how="left")
+    cp_path = raw / "extra" / "codes-postaux.json"
+    if cp_path.exists():  # geo.api.gouv.fr/communes?fields=code,codesPostaux (one call, no geometry)
+        cp = pl.DataFrame([{"code": c["code"], "postcodes": " ".join(sorted(set(c.get("codesPostaux") or [])))}
+                           for c in json.loads(cp_path.read_text())])
+        df = df.join(cp.filter(pl.col("postcodes") != ""), on="code", how="left")
+    # Absent from an INSEE tourism file = no tourist accommodation that year.
+    df = df.with_columns(*(pl.col(f"tour_beds_{y}").fill_null(0) for y in tourism.YEARS if f"tour_beds_{y}" in df.columns))
     # Boolean risk flags: absent from a source list means "not declared", not unknown.
     bool_cols = [c for c, (u, _) in COLUMNS.items() if u == "bool" and c in df.columns]
     df = df.with_columns(*(pl.col(c).fill_null(False) for c in bool_cols))
@@ -518,6 +545,12 @@ def build(raw: Path, out: Path) -> None:
          "vintage": "rentrée 2025", "url": "https://data.enseignementsup-recherche.gouv.fr/", "credit": None},
         {"key": "tapwater", "producer": "Ministère de la Santé – contrôle sanitaire de l’eau distribuée, résultats par paramètre (pesticides, PFAS)",
          "licence": "Licence Ouverte 2.0", "vintage": "analyses 2025", "url": DIS_2025, "credit": None},
+        {"key": "relief", "producer": "IGN – BD ALTI® V2, MNT 75 m", "licence": "Licence Ouverte 2.0",
+         "vintage": "édition 2020", "url": "https://geoservices.ign.fr/bdalti", "credit": None},
+        {"key": "forest", "producer": "ESA WorldCover 10 m 2021 v200 (Zanaga et al. 2022)", "licence": "CC BY 4.0",
+         "vintage": "2021", "url": "https://esa-worldcover.org/", "credit": "© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium"},
+        {"key": "tourism_history", "producer": "INSEE – capacité des communes en hébergement touristique, millésimes 2015 à 2026",
+         "licence": "Licence Ouverte 2.0", "vintage": "2015–2026", "url": "https://www.insee.fr/fr/statistiques/2021703", "credit": None},
         {"key": "soil", "producer": "Géorisques / BRGM – CASIAS, sites et sols pollués (ex-BASOL), secteurs d’information sur les sols (SIS)",
          "licence": "Licence Ouverte 2.0", "vintage": "extraction 2026-10", "url": "https://www.georisques.gouv.fr/donnees/bases-de-donnees", "credit": None},
     ]
