@@ -270,7 +270,7 @@ def living_themes(raw: Path, x: dict, base: pl.DataFrame, feats: list[dict]) -> 
 
 def dvf_themes(raw: Path, x: dict) -> dict[str, pl.DataFrame]:
     """DVF is processed one département at a time to keep memory low."""
-    parts: dict[str, list[pl.DataFrame]] = {"prices": [], "trend": [], "land": [], "history": []}
+    parts: dict[str, list[pl.DataFrame]] = {"prices": [], "trend": [], "land": [], "history": [], "parking": []}
     for d in DEPTS:
         files = [raw / dep_dir(d) / f"dvf-{y}.csv.gz" for y in DVF_YEARS]
         files = [f for f in files if f.exists()]
@@ -282,6 +282,7 @@ def dvf_themes(raw: Path, x: dict) -> dict[str, pl.DataFrame]:
         parts["trend"].append(dvf.price_trend(sales, DVF_END))
         parts["land"].append(dvf.land_metrics(remap(df, x, col="code_commune"), DVF_END))
         parts["history"].append(dvf.price_by_year(sales, DVF_YEARS))
+        parts["parking"].append(dvf.parking_metrics(remap(df, x, col="code_commune"), DVF_END))
     return {k: pl.concat(v, how="diagonal_relaxed") for k, v in parts.items()}
 
 
@@ -388,6 +389,14 @@ COLUMNS = {
     "postcodes": ("text", "Postal codes of the commune, space-separated (geo.api.gouv.fr)"),
     "tour_beds_change": ("ratio", "Change in tourist beds 2019 -> 2026 (INSEE)"),
     "tour_beds_added": ("beds", "Tourist beds added 2019 -> 2026"),
+    "parking_price": ("€", "Median price of one standalone outbuilding (garage/parking/cellar), last 36 months (DVF)"),
+    "n_parking_sales": ("count", "Standalone outbuilding sales, last 36 months"),
+    "car_share": ("ratio", "Households with at least one car (RP 2023)"),
+    "parking_spot_share": ("ratio", "Households with a reserved parking spot (RP 2023)"),
+    "cars_per_household": ("cars", "Cars per household, lower bound (2+ counted as 2)"),
+    "parking_gap_share": ("ratio", "Estimated households with a car but no spot / households"),
+    "parking_gap": ("count", "Estimated households with a car but no reserved spot"),
+    "zfe_share": ("ratio", "Share of commune area in a low-emission zone restricting private cars today"),
     "second_homes_2022": ("count", "Second homes 2022"),
     "second_homes_change": ("ratio", "Change in second homes 2011 -> 2022"),
     "second_home_share_change": ("ratio", "Change in second-home share of dwellings 2011 -> 2022 (points)"),
@@ -445,6 +454,7 @@ def build(raw: Path, out: Path) -> None:
         ("demand", lambda: demand_themes(raw, x, base)),
         ("contamination", lambda: contamination_themes(raw, x)),
         ("nature", lambda: {"relief": nature.relief(raw / "extra" / "bdalti", feats), "forest": nature.forest(feats)}),
+        ("zfe", lambda: {"zfe": nature.zfe(raw / "extra" / "zfe-aires.geojson", feats, date.today().isoformat())}),
         ("tourism", lambda: {
             "tourism_history": tourism.capacity_history(raw / "extra" / "tourism", DEPTS, x),
             "second_homes": tourism.second_homes(raw / "serie-historique-2022.zip", DEPTS, x),
@@ -551,6 +561,8 @@ def build(raw: Path, out: Path) -> None:
          "vintage": "2021", "url": "https://esa-worldcover.org/", "credit": "© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium"},
         {"key": "tourism_history", "producer": "INSEE – capacité des communes en hébergement touristique, millésimes 2015 à 2026",
          "licence": "Licence Ouverte 2.0", "vintage": "2015–2026", "url": "https://www.insee.fr/fr/statistiques/2021703", "credit": None},
+        {"key": "zfe", "producer": "Point d’accès national transport.data.gouv.fr – base nationale consolidée des ZFE", "licence": "Licence Ouverte 2.0",
+         "vintage": "mise à jour du 26 mars 2026", "url": "https://transport.data.gouv.fr/datasets/base-nationale-consolidee-des-zones-a-faibles-emissions", "credit": None},
         {"key": "soil", "producer": "Géorisques / BRGM – CASIAS, sites et sols pollués (ex-BASOL), secteurs d’information sur les sols (SIS)",
          "licence": "Licence Ouverte 2.0", "vintage": "extraction 2026-10", "url": "https://www.georisques.gouv.fr/donnees/bases-de-donnees", "credit": None},
     ]

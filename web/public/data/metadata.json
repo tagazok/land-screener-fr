@@ -1,5 +1,5 @@
 {
- "built": "2026-10-29",
+ "built": "2026-10-30",
  "scope": {
   "label": "France métropolitaine",
   "departements": 96,
@@ -268,6 +268,14 @@
    "licence": "Licence Ouverte 2.0",
    "vintage": "2015–2026",
    "url": "https://www.insee.fr/fr/statistiques/2021703",
+   "credit": null
+  },
+  {
+   "key": "zfe",
+   "producer": "Point d’accès national transport.data.gouv.fr – base nationale consolidée des ZFE",
+   "licence": "Licence Ouverte 2.0",
+   "vintage": "mise à jour du 26 mars 2026",
+   "url": "https://transport.data.gouv.fr/datasets/base-nationale-consolidee-des-zones-a-faibles-emissions",
    "credit": null
   },
   {
@@ -584,6 +592,38 @@
    "unit": "beds",
    "label": "Tourist beds added 2019 -> 2026"
   },
+  "parking_price": {
+   "unit": "€",
+   "label": "Median price of one standalone outbuilding (garage/parking/cellar), last 36 months (DVF)"
+  },
+  "n_parking_sales": {
+   "unit": "count",
+   "label": "Standalone outbuilding sales, last 36 months"
+  },
+  "car_share": {
+   "unit": "ratio",
+   "label": "Households with at least one car (RP 2023)"
+  },
+  "parking_spot_share": {
+   "unit": "ratio",
+   "label": "Households with a reserved parking spot (RP 2023)"
+  },
+  "cars_per_household": {
+   "unit": "cars",
+   "label": "Cars per household, lower bound (2+ counted as 2)"
+  },
+  "parking_gap_share": {
+   "unit": "ratio",
+   "label": "Estimated households with a car but no spot / households"
+  },
+  "parking_gap": {
+   "unit": "count",
+   "label": "Estimated households with a car but no reserved spot"
+  },
+  "zfe_share": {
+   "unit": "ratio",
+   "label": "Share of commune area in a low-emission zone restricting private cars today"
+  },
   "second_homes_2022": {
    "unit": "count",
    "label": "Second homes 2022"
@@ -818,6 +858,14 @@
   "postcodes": 1.0,
   "tour_beds_change": 0.227,
   "tour_beds_added": 0.993,
+  "parking_price": 0.052,
+  "n_parking_sales": 0.17,
+  "car_share": 0.993,
+  "parking_spot_share": 0.993,
+  "cars_per_household": 0.993,
+  "parking_gap_share": 0.993,
+  "parking_gap": 0.993,
+  "zfe_share": 0.005,
   "second_homes_2022": 0.993,
   "second_homes_change": 0.675,
   "second_home_share_change": 0.993,
@@ -891,6 +939,14 @@
    "unmatched": [
     "12076",
     "14011",
+    "49069",
+    "69159"
+   ]
+  },
+  "parking": {
+   "matched": 5890,
+   "unmatched": [
+    "12076",
     "49069",
     "69159"
    ]
@@ -1100,6 +1156,10 @@
   },
   "forest": {
    "matched": 34746,
+   "unmatched": []
+  },
+  "zfe": {
+   "matched": 168,
    "unmatched": []
   },
   "tourism_history": {

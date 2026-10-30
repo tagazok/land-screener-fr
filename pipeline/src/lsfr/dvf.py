@@ -167,3 +167,33 @@ def price_by_year(sales: pl.DataFrame, years: list[str], min_n: int = 5) -> pl.D
         part = m.join(n, on="code", how="full", coalesce=True)
         out = part if out is None else out.join(part, on="code", how="full", coalesce=True)
     return out
+
+
+# A single outbuilding sold on its own: garage, box, parking space, but also cellar or storeroom
+# (DVF does not tell them apart). Bounds drop symbolic sales and lots of several spaces.
+PARKING_PRICE_BOUNDS = (1_000, 150_000)
+
+
+def parking_metrics(df: pl.DataFrame, end: str, min_n: int = 5) -> pl.DataFrame:
+    """Median price of one standalone outbuilding (garage / parking) over the 36 months ending at `end`.
+
+    Kept: sales whose only local is exactly one 'Dépendance', in one disposition, with no land
+    parcel bigger than 100 m² (a field with a shed is not a parking space).
+    """
+    end_d = pl.lit(end).str.to_date()
+    s = df.filter((pl.col("nature_mutation") == "Vente") & (pl.col("date_mutation") > end_d.dt.offset_by("-36mo"))
+                  & (pl.col("date_mutation") <= end_d))
+    per_mut = s.group_by("id_mutation").agg(
+        pl.col("code_commune").first().alias("code"),
+        pl.col("valeur_fonciere").first().alias("price"),
+        pl.col("type_local").drop_nulls().alias("types"),
+        pl.col("numero_disposition").n_unique().alias("n_disp"),
+        pl.col("surface_terrain").max().alias("land"),
+    )
+    lo, hi = PARKING_PRICE_BOUNDS
+    one = per_mut.filter(
+        (pl.col("types").list.len() == 1) & (pl.col("types").list.first() == "Dépendance") & (pl.col("n_disp") == 1)
+        & (pl.col("land").fill_null(0) <= 100) & pl.col("price").is_between(lo, hi)
+    )
+    g = one.group_by("code").agg(pl.col("price").median().alias("parking_price"), pl.len().alias("n_parking_sales"))
+    return g.with_columns(pl.when(pl.col("n_parking_sales") >= min_n).then(pl.col("parking_price")).alias("parking_price"))

@@ -29,6 +29,14 @@ QUERIES = {
                                                   CARS="_T", CARPARK="_T", NOR="_T", L_STAY="_T", RP_MEASURE="DWELLINGS")),
     "rp_social": ("DS_RP_LOGEMENT_PRINC", dict(TIME_PERIOD="2023", OCS="DW_MAIN", TSH="221", TDW="_T", BUILD_END="_T", NRG_SRC="_T",
                                                CARS="_T", CARPARK="_T", NOR="_T", L_STAY="_T", RP_MEASURE="DWELLINGS")),
+    # Parking demand: households with at least one car, with two or more, and with a car but no reserved spot.
+    "rp_cars_ge1": ("DS_RP_LOGEMENT_PRINC", dict(TIME_PERIOD="2023", OCS="DW_MAIN", TSH="_T", TDW="_T", BUILD_END="_T", NRG_SRC="_T",
+                                                 CARS="C_GE1", CARPARK="_T", NOR="_T", L_STAY="_T", RP_MEASURE="DWELLINGS")),
+    "rp_cars_ge2": ("DS_RP_LOGEMENT_PRINC", dict(TIME_PERIOD="2023", OCS="DW_MAIN", TSH="_T", TDW="_T", BUILD_END="_T", NRG_SRC="_T",
+                                                 CARS="C_GE2", CARPARK="_T", NOR="_T", L_STAY="_T", RP_MEASURE="DWELLINGS")),
+    # Melodi publishes CARS and CARPARK only as margins (no crossed cell): fetch "with a reserved spot".
+    "rp_with_spot": ("DS_RP_LOGEMENT_PRINC", dict(TIME_PERIOD="2023", OCS="DW_MAIN", TSH="_T", TDW="_T", BUILD_END="_T", NRG_SRC="_T",
+                                                  CARS="_T", CARPARK="1", NOR="_T", L_STAY="_T", RP_MEASURE="DWELLINGS")),
     "active_15_64": ("DS_RP_EMPLOI_LR_PRINC", dict(TIME_PERIOD="2023", AGE="Y15T64", EDUC="_T", SEX="_T", EMPSTA_ENQ="1T2", RP_MEASURE="POP")),
     "unemployed_15_64": ("DS_RP_EMPLOI_LR_PRINC", dict(TIME_PERIOD="2023", AGE="Y15T64", EDUC="_T", SEX="_T", EMPSTA_ENQ="2", RP_MEASURE="POP")),
     "jobs": ("DS_RP_EMPLOI_LT_PRINC", dict(TIME_PERIOD="2023", AGE="_T", EMPFORM="_T", SEX="_T", WKTIME="_T", EMPSTA_ENQ="1", RP_MEASURE="NBEMP")),

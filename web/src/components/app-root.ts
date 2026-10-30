@@ -3,7 +3,10 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { compareScore, evaluate, num, type FilterDef, type Row, type Scored, type SignalDef, type Tier } from '../engine';
 import { CSV_SEP, csvValue, fmt } from '../format';
 import { VERDICT_LABEL, judge, type Verdict } from '../judge';
-import { DEFAULT_FINANCE, REFERENCE_SURFACE, decodeFinance, encodeFinance, simulate, withFinance, type Finance } from '../finance';
+import {
+  DEFAULT_FINANCE, REFERENCE_SURFACE, decodeFinance, decodeRents, encodeFinance, encodeRents, parkingRentFor, simulate, simulateParking,
+  withFinance, type Finance,
+} from '../finance';
 import { makeScale, type Scale } from '../scale';
 import {
   COLUMNS, DETAIL_GROUPS, FILTERS, HELP, SIGNALS, STRATEGIES, columnHelp, derive, missingDataNote, preset,
@@ -233,7 +236,7 @@ export class AppRoot extends LitElement {
     this.signals = s.signals;
     this.selected = s.selected;
     this.scopes = s.scopes ?? [];
-    this.finance = decodeFinance(s.finance ?? null);
+    this.finance = { ...decodeFinance(s.finance ?? null), parkingRents: decodeRents(s.rents) };
     this.custom = s.custom ?? [];
     this.tiers = s.tiers ?? [];
     this.columns = defaultColumns(s.strategy);
@@ -241,7 +244,7 @@ export class AppRoot extends LitElement {
 
   private pushUrl() {
     const h = encode({
-      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom, tiers: this.tiers,
+      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom, tiers: this.tiers, rents: encodeRents(this.finance.parkingRents),
     });
     history.replaceState(null, '', `#${h}`);
   }
@@ -580,6 +583,7 @@ export class AppRoot extends LitElement {
   private filterChip(f: FilterDef): string {
     const col = COLUMNS[f.column]?.label ?? f.column;
     if (f.id === 'landdata') return 'Avec ventes de terrains';
+    if (f.id === 'parkingdata') return 'Avec ventes de parkings';
     if (f.op === 'isFalse') return `Sans : ${col.toLowerCase()}`;
     if (f.op === 'isTrue') return col;
     const v = fmt(f.column, f.value ?? null);
@@ -605,7 +609,7 @@ export class AppRoot extends LitElement {
         <nav class="tabs" role="tablist" aria-label="Stratégie d’investissement">
           ${STRATEGIES.map((s) => html`
             <button role="tab" aria-selected=${s.id === this.strategy} class=${s.id === this.strategy ? 'on' : ''}
-              @click=${() => this.setStrategy(s.id)}>${s.label}</button>`)}
+              title=${s.label} @click=${() => this.setStrategy(s.id)}>${s.label.replace(/ \(.*\)$/, "")}</button>`)}
         </nav>
         <span class="grow"></span>
         <div class="themes" role="radiogroup" aria-label="Thème">
@@ -620,9 +624,10 @@ export class AppRoot extends LitElement {
           <section class="summary" aria-label="Réglages actifs">
             <div class="summary-text">
               <p>${st.blurb}</p>
+              ${this.renderAssumptions()}
               <div class="chips">
                 ${this.scopes.length ? html`<span class="chip strong">${this.scopeLabel}</span>` : nothing}
-                ${this.strategy !== 'land' ? html`
+                ${this.strategy !== 'land' && this.strategy !== 'parking' ? html`
                   <div class="seg" role="radiogroup" aria-label="Type de bien">
                     ${(['house', 'apt'] as PropertyType[]).map((t) => html`
                       <button role="radio" aria-checked=${this.type === t} class=${this.type === t ? 'on' : ''} @click=${() => this.setType(t)}>
@@ -725,7 +730,7 @@ export class AppRoot extends LitElement {
           <span>${info.label}</span>
         </label>
         ${tip(info.label, help)}
-        ${(f.op === 'min' || f.op === 'max') && f.id !== 'landdata' ? html`
+        ${(f.op === 'min' || f.op === 'max') && f.id !== 'landdata' && f.id !== 'parkingdata' ? html`
           <span class="fval">
             <input type="number" step=${isPct ? '0.5' : 'any'} .value=${String(shown ?? '')} ?disabled=${!f.enabled}
               aria-label=${info.label}
@@ -743,11 +748,14 @@ export class AppRoot extends LitElement {
       const v = passing.map((r) => num(r.row[col])).filter((x): x is number => x !== null).sort((a, b) => a - b);
       return v.length ? v[Math.floor(v.length / 2)] : null;
     };
-    const priceCol = this.strategy === 'land' ? 'land_price_m2' : 'price_m2';
+    const priceCol = this.strategy === 'land' ? 'land_price_m2' : this.strategy === 'parking' ? 'parking_price' : 'price_m2';
     const card = (value: unknown, label: string, help: string) => html`
       <div class="stat"><span class="label">${label}${tip(label, help)}</span><b>${value}</b></div>`;
     const extra = this.strategy === 'live'
       ? card(val('apl_gp', med('apl_gp')), 'accès médecins médian', `${HELP.median}\n\n${columnHelp('apl_gp')}`)
+      : this.strategy === 'parking'
+        ? card(val('parking_gross_yield', med('parking_gross_yield')), 'rendement brut parking médian',
+            `${HELP.median}\n\n${columnHelp('parking_gross_yield')}\n\nVide tant qu’aucun loyer de place n’est indiqué (lien « Modifier » au-dessus).`)
       : this.strategy !== 'land'
         ? card(val('gross_yield', med('gross_yield')), 'rendement brut médian', `${HELP.median}\n\n${columnHelp('gross_yield')}`)
         : nothing;
@@ -1028,7 +1036,7 @@ export class AppRoot extends LitElement {
               ${adLinks(row).map((l) => html`<a href=${l.url} target="_blank" rel="noopener noreferrer">${l.label} ↗</a>`)}
             </div>` : nothing}
           ${this.detailWarnings(row)}
-          ${this.renderSimulation(row)}
+          ${this.strategy === 'parking' ? this.renderParkingSimulation(row) : this.renderSimulation(row)}
           ${this.renderHistory(row)}
           ${this.renderTourism(row)}
 
@@ -1041,6 +1049,37 @@ export class AppRoot extends LitElement {
           <p class="code">Code INSEE ${row.code}</p>
         </div>
       </aside>`;
+  }
+
+  /** Open the drawer on the purchase assumptions. */
+  private editAssumptions() {
+    this.settingsOpen = true;
+    this.updateComplete.then(() => this.renderRoot.querySelector('#assumptions')?.scrollIntoView({ block: 'start' }));
+  }
+
+  /** One line under the strategy blurb: the assumptions the yields on screen rely on, with a "Modifier" link. */
+  private renderAssumptions() {
+    if (!['long', 'medium', 'parking'].includes(this.strategy)) return nothing;
+    const f = this.finance;
+    const p = (v: number) => fmt('net_yield', v);
+    const credit = `apport ${p(f.deposit)} · crédit ${p(f.rate)} sur ${f.years} ans · charges ${p(f.charges)} · vacance ${f.vacancy} mois/an`;
+    const local = Object.keys(f.parkingRents ?? {}).length;
+    const head = this.strategy === 'parking'
+      ? html`${f.parkingRent > 0 ? html`place louée <b>${fmt('purchase_price', f.parkingRent)}/mois</b>` : html`<b class="warn">loyer d’une place non indiqué</b>`}
+          ${local ? html` (${local} ${local > 1 ? 'villes' : 'ville'} avec un loyer propre)` : nothing}
+          · taxe foncière ${fmt('purchase_price', f.parkingTax)}/an · `
+      : html`${this.type === 'house' ? 'maison' : 'appartement'} de ${f.surface || REFERENCE_SURFACE[this.type]} m² · `;
+    return html`
+      <p class="assume">${this.strategy === 'parking' ? 'Rendements calculés avec' : 'Rendement net et cash-flow calculés avec'} : ${head}${credit}
+        · <button class="link" @click=${() => this.editAssumptions()}>Modifier</button></p>`;
+  }
+
+  /** Set (or clear, with null) the parking rent of one commune. */
+  private setLocalRent(code: string, rent: number | null) {
+    const r = { ...(this.finance.parkingRents ?? {}) };
+    if (rent === null || rent <= 0 || rent === this.finance.parkingRent) delete r[code];
+    else r[code] = rent;
+    this.setFinance({ parkingRents: r });
   }
 
   private setFinance(patch: Partial<Finance>) {
@@ -1063,7 +1102,7 @@ export class AppRoot extends LitElement {
       </label>`;
     const pct = (v: number) => Math.round(v * 1000) / 10;
     return html`
-      <h3>Hypothèses d’achat <small>rendement net et cash-flow</small> ${tip('Hypothèses d’achat', HELP.finance)}</h3>
+      <h3 id="assumptions">Hypothèses d’achat <small>rendement net et cash-flow</small> ${tip('Hypothèses d’achat', HELP.finance)}</h3>
       <div class="fingrid">
         ${field('Surface', f.surface || ref, 'm²', '1', (v) => this.setFinance({ surface: v === ref ? 0 : v }),
           `Surface du bien simulé. Par défaut ${ref} m² (${this.type === 'house' ? 'maison' : 'appartement'}), la surface de référence des loyers ANIL : au-delà, le loyer au m² réel est en général plus bas.`)}
@@ -1074,8 +1113,64 @@ export class AppRoot extends LitElement {
         ${field('Charges et entretien', pct(f.charges), '% loyer', '1', (v) => this.setFinance({ charges: v / 100 }),
           'Charges de copropriété non récupérables, entretien, assurance propriétaire non occupant, gestion éventuelle. 10 à 20 % du loyer selon le bien.')}
         ${field('Vacance', f.vacancy, 'mois/an', '0.5', (v) => this.setFinance({ vacancy: Math.min(12, v) }), 'Nombre moyen de mois par an sans locataire.')}
+        ${this.strategy === 'parking' ? html`
+          ${field('Loyer d’une place', f.parkingRent, '€/mois', '5', (v) => this.setFinance({ parkingRent: v }),
+            'Loyer mensuel d’une place ou d’un garage, à relever sur les annonces locales : aucune donnée publique ne le fournit. Le même loyer est appliqué à toutes les communes : comparez des communes d’un même marché, ou ajustez-le.')}
+          ${field('Taxe foncière place', f.parkingTax, '€/an', '10', (v) => this.setFinance({ parkingTax: v }),
+            'Taxe foncière d’une place ou d’un garage. Souvent quelques dizaines d’euros par an ; elle figure dans l’annonce ou l’avis du vendeur.')}` : nothing}
       </div>
       <button class="link" @click=${() => this.setFinance({ ...DEFAULT_FINANCE })}>Hypothèses par défaut</button>`;
+  }
+
+  /** One parking space at the commune's median price, with the rent the user entered. */
+  private renderParkingSimulation(row: Row) {
+    const f = this.finance;
+    const open = html`<button class="link" @click=${() => this.editAssumptions()}>Modifier les hypothèses</button>`;
+    if (typeof row.parking_price !== 'number') {
+      return html`<details open class="grp"><summary>Simulation : une place</summary>
+        <p class="muted">Pas assez de ventes de garages ou de places ici (moins de 5 en 3 ans) pour un prix fiable.</p></details>`;
+    }
+    const sim = simulateParking(row, f);
+    const own = f.parkingRents?.[row.code];
+    const rent = parkingRentFor(row.code, f);
+    const rentField = html`
+      <div class="localrent">
+        <label>Loyer d’une place à ${row.nom}
+          <span class="fval"><input type="number" min="0" step="5" .value=${rent > 0 ? String(rent) : ''} placeholder="€"
+            aria-label="Loyer mensuel d’une place à ${row.nom}"
+            @change=${(e: Event) => { const v = Number((e.target as HTMLInputElement).value); this.setLocalRent(row.code, Number.isFinite(v) && v > 0 ? v : null); }}><i>€/mois</i></span>
+        </label>
+        ${own !== undefined
+          ? html`<span class="tag">propre à cette ville</span>
+              <button class="link" @click=${() => this.setLocalRent(row.code, null)}>${f.parkingRent > 0 ? `Revenir au loyer général (${fmt('purchase_price', f.parkingRent)})` : 'Effacer'}</button>`
+          : html`<span class="muted small">${f.parkingRent > 0 ? 'loyer général' : 'aucun loyer indiqué'}</span>`}
+      </div>`;
+    if (!sim) {
+      return html`<details open class="grp"><summary>Simulation : une place</summary>
+        <p class="muted">Prix médian d’une place : <b>${fmt('parking_price', row.parking_price)}</b> (${row.n_parking_sales} ventes en 3 ans). Indiquez le loyer d’une place ici, relevé par exemple sur les annonces de la ville, pour calculer le rendement.</p>
+        ${rentField}</details>`;
+    }
+    const e = (v: number) => fmt('purchase_price', Math.round(v));
+    return html`
+      <details open class="grp sim">
+        <summary>Simulation : une place${tip('Simulation : une place', 'Une place au prix médian DVF de la commune, louée au loyer indiqué : celui de cette ville si vous en avez saisi un, sinon le loyer général des hypothèses d’achat. Il n’existe pas de données publiques sur les loyers de parkings : vérifiez le loyer local sur les sites d’annonces.')}</summary>
+        ${rentField}
+        <p class="muted small">Crédit, charges et vacance : hypothèses générales. ${open}</p>
+        <dl>
+          <dt>Prix médian (${row.n_parking_sales} ventes)</dt><dd>${e(sim.price)}</dd>
+          <dt>+ Frais de notaire (${fmt('net_yield', f.notary)})</dt><dd>${e(sim.notaryFees)}</dd>
+          <dt><b>= Coût total</b></dt><dd><b>${e(sim.totalCost)}</b></dd>
+          <dt>Loyer annuel</dt><dd>${e(sim.rentYear)}</dd>
+          <dt><b>Rendement brut</b>${colTip('parking_gross_yield')}</dt><dd>${val('parking_gross_yield', sim.grossYield)}</dd>
+          <dt>− Vacance (${f.vacancy} mois/an)</dt><dd>${e(-sim.vacancyLoss)}</dd>
+          <dt>− Charges et entretien (${fmt('net_yield', f.charges)})</dt><dd>${e(-sim.charges)}</dd>
+          <dt>− Taxe foncière</dt><dd>${e(-sim.propertyTax)}</dd>
+          <dt><b>Rendement net</b>${colTip('parking_net_yield')}</dt><dd>${val('parking_net_yield', sim.netYield)}</dd>
+          <dt>Mensualité (${fmt('net_yield', f.rate)}, ${f.years} ans)</dt><dd>${e(-sim.monthlyPayment)}</dd>
+          <dt><b>Cash-flow mensuel</b></dt><dd>${val('parking_cashflow_month', Math.round(sim.cashflowMonth))}</dd>
+        </dl>
+        <p class="muted small">Un parking loué seul relève du Code civil : loyer libre, pas de DPE. Les charges de copropriété d’une place varient beaucoup : ajustez « Charges et entretien ».</p>
+      </details>`;
   }
 
   /** Step-by-step purchase simulation for the selected commune. */
@@ -1231,14 +1326,14 @@ export class AppRoot extends LitElement {
     .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--line); }
 
     /* ---- header ---- */
-    header { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 28px;
+    header { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
       padding: 10px 20px; background: linear-gradient(115deg, #0d3a26, #175c3c 60%, #1f7a4c); color: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.12); }
     .brand { display: flex; align-items: center; gap: 10px; }
     .brand svg { width: 30px; height: 30px; background: rgba(255,255,255,.1); border-radius: 9px; padding: 3px; }
     .brand span { display: flex; flex-direction: column; line-height: 1.15; }
     .brand b { font-size: 16px; letter-spacing: -.01em; } .brand small { font-size: 11.5px; opacity: .7; }
     .tabs { display: flex; gap: 2px; flex-wrap: wrap; background: rgba(0,0,0,.18); padding: 4px; border-radius: 12px; }
-    .tabs button { border: 0; background: transparent; color: rgba(255,255,255,.82); padding: 7px 14px; border-radius: 9px; cursor: pointer; font-weight: 500; transition: background .15s, color .15s; }
+    .tabs button { border: 0; background: transparent; color: rgba(255,255,255,.82); padding: 7px 12px; border-radius: 9px; cursor: pointer; font-weight: 500; white-space: nowrap; transition: background .15s, color .15s; }
     .tabs button:hover { background: rgba(255,255,255,.1); color: #fff; }
     .tabs button.on { background: #fff; color: var(--brand); font-weight: 650; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
     .tabs button:focus-visible, .btn:focus-visible, .seg button:focus-visible { outline: 2px solid #9be3b5; outline-offset: 2px; }
@@ -1254,6 +1349,13 @@ export class AppRoot extends LitElement {
     /* ---- summary of active settings ---- */
     .summary { display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; }
     .summary-text p { margin: 0 0 10px; color: var(--muted); max-width: 820px; font-size: 14.5px; }
+    .localrent { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+    .localrent label { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; flex-wrap: wrap; }
+    .localrent .tag { font-size: 11px; font-weight: 700; color: var(--brand-2); background: var(--brand-soft); border-radius: 999px; padding: 1px 8px; }
+    .summary-text p.assume { font-size: 12.5px; margin-top: -4px; }
+    .summary-text p.assume b { color: var(--ink-2); font-weight: 650; }
+    .summary-text p.assume b.warn { color: var(--warn); }
+    .summary-text p.assume .link { font-size: 12.5px; font-weight: 650; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .chip { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; color: var(--ink-2); }
     .chip.custom { border-color: var(--brand-2); background: var(--brand-soft); display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
@@ -1381,9 +1483,11 @@ export class AppRoot extends LitElement {
     .grow { flex: 1; }
     .tablewrap { overflow: auto; max-height: 70vh; }
     table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13.5px; }
+    /* Sticky headers each form a layer: lift the one whose tooltip is open above its neighbours. */
+    th:hover, th:focus-within { z-index: 4; }
     th { position: sticky; top: 0; z-index: 1; background: var(--th-bg); text-align: left; vertical-align: bottom; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
-    .th { display: inline-flex; align-items: center; padding: 9px 10px; }
-    th button { border: 0; background: none; padding: 0; cursor: pointer; font-weight: 650; text-align: left; color: inherit; font-size: 12px; line-height: 1.25; max-width: 130px; }
+    .th { display: inline-flex; align-items: flex-end; gap: 4px; padding: 9px 10px; }
+    th button { border: 0; background: none; padding: 0; cursor: pointer; font-weight: 650; text-align: left; color: inherit; font-size: 12px; line-height: 1.25; min-width: 88px; max-width: 150px; }
     th button:hover { color: var(--ink); }
     td { padding: 8px 10px; border-bottom: 1px solid var(--row-line); white-space: nowrap; }
     td.num, th.num { color: var(--faint); width: 32px; text-align: right; }
