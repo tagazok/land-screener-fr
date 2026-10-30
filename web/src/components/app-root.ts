@@ -606,7 +606,7 @@ export class AppRoot extends LitElement {
         <nav class="tabs" role="tablist" aria-label="Stratégie d’investissement">
           ${STRATEGIES.map((s) => html`
             <button role="tab" aria-selected=${s.id === this.strategy} class=${s.id === this.strategy ? 'on' : ''}
-              @click=${() => this.setStrategy(s.id)}>${s.label}</button>`)}
+              title=${s.label} @click=${() => this.setStrategy(s.id)}>${s.label.replace(/ \(.*\)$/, "")}</button>`)}
         </nav>
         <span class="grow"></span>
         <div class="themes" role="radiogroup" aria-label="Thème">
@@ -1276,14 +1276,14 @@ export class AppRoot extends LitElement {
     .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--line); }
 
     /* ---- header ---- */
-    header { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 28px;
+    header { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
       padding: 10px 20px; background: linear-gradient(115deg, #0d3a26, #175c3c 60%, #1f7a4c); color: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.12); }
     .brand { display: flex; align-items: center; gap: 10px; }
     .brand svg { width: 30px; height: 30px; background: rgba(255,255,255,.1); border-radius: 9px; padding: 3px; }
     .brand span { display: flex; flex-direction: column; line-height: 1.15; }
     .brand b { font-size: 16px; letter-spacing: -.01em; } .brand small { font-size: 11.5px; opacity: .7; }
     .tabs { display: flex; gap: 2px; flex-wrap: wrap; background: rgba(0,0,0,.18); padding: 4px; border-radius: 12px; }
-    .tabs button { border: 0; background: transparent; color: rgba(255,255,255,.82); padding: 7px 14px; border-radius: 9px; cursor: pointer; font-weight: 500; transition: background .15s, color .15s; }
+    .tabs button { border: 0; background: transparent; color: rgba(255,255,255,.82); padding: 7px 12px; border-radius: 9px; cursor: pointer; font-weight: 500; white-space: nowrap; transition: background .15s, color .15s; }
     .tabs button:hover { background: rgba(255,255,255,.1); color: #fff; }
     .tabs button.on { background: #fff; color: var(--brand); font-weight: 650; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
     .tabs button:focus-visible, .btn:focus-visible, .seg button:focus-visible { outline: 2px solid #9be3b5; outline-offset: 2px; }

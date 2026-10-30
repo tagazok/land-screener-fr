@@ -131,6 +131,11 @@ export class AiChat extends LitElement {
     } catch { /* ignore */ }
   }
 
+  updated() {
+    // Docked layout only while the panel is open: closed, the button returns to the bottom left.
+    this.toggleAttribute('dock-open', this.open && this.docked);
+  }
+
   private onAnswerClick(e: Event) {
     const a = (e.target as HTMLElement).closest('a.commune') as HTMLElement | null;
     if (!a?.dataset.code) return;
@@ -351,13 +356,13 @@ export class AiChat extends LitElement {
 
   static styles = css`
     :host { position: fixed; left: 18px; bottom: 18px; z-index: 55; font: inherit; color: var(--ink); }
-    :host([docked]) { left: 0; top: var(--header-h, 56px); bottom: 0; width: var(--chat-w, 380px); z-index: 27; }
-    :host([docked]) .panel { width: 100%; height: 100%; border-radius: 0; border-width: 0 1px 0 0; box-shadow: 8px 0 24px rgba(16,32,24,.06); position: relative; }
+    :host([dock-open]) { left: 0; top: var(--header-h, 56px); bottom: 0; width: var(--chat-w, 380px); z-index: 27; }
+    :host([dock-open]) .panel { width: 100%; height: 100%; border-radius: 0; border-width: 0 1px 0 0; box-shadow: 8px 0 24px rgba(16,32,24,.06); position: relative; }
     .resize { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 2; touch-action: none; }
     .resize:hover, .resize:active { background: linear-gradient(90deg, transparent 3px, var(--brand-2) 3px, var(--brand-2) 5px, transparent 5px); }
     .icon svg { width: 17px; height: 17px; vertical-align: -3px; }
     .icon[aria-pressed='true'] { color: var(--brand-2); }
-    @media (max-width: 900px) { .dock { display: none; } :host([docked]) { width: 100vw; } }
+    @media (max-width: 900px) { .dock { display: none; } :host([dock-open]) { width: 100vw; } }
     .fab { border: 0; border-radius: 999px; padding: 11px 18px; font: inherit; font-weight: 650; cursor: pointer;
       background: var(--brand); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.22); }
     .panel { width: min(420px, calc(100vw - 36px)); height: min(620px, calc(100vh - 110px)); display: flex; flex-direction: column;
