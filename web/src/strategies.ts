@@ -720,7 +720,7 @@ export const STRATEGIES: Strategy[] = [
   {
     id: 'parking',
     label: 'Parking / garage',
-    blurb: 'Acheter une place de parking ou un garage pour le louer. Privilégie les communes où beaucoup de ménages ont une voiture sans place, et les places bon marché. Indiquez le loyer d’une place dans « Filtres et poids » pour obtenir le rendement.',
+    blurb: 'Acheter une place de parking ou un garage pour le louer. Privilégie les communes où beaucoup de ménages ont une voiture sans place, et les places bon marché. Le rendement dépend du loyer d’une place : indiquez-le avec « Modifier » ci-dessous, ou ville par ville dans sa fiche.',
     type: 'apt',
     filters: [
       f('parkingdata', 'parking_price', 'min', 0, true, true),
