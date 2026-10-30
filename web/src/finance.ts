@@ -25,6 +25,25 @@ export interface Finance {
   parkingRent: number;
   /** Property tax of one parking space, €/year (unknown per commune: entered by the user). */
   parkingTax: number;
+  /** Rent of one space in specific communes (INSEE code -> €/month), replacing parkingRent there. */
+  parkingRents?: Record<string, number>;
+}
+
+/** The rent used for one commune: its own if the user set one, else the general rent. */
+export const parkingRentFor = (code: string, f: Finance): number => f.parkingRents?.[code] ?? f.parkingRent;
+
+/** Per-commune rents in the share link: "33063:110,69123:120". */
+export function encodeRents(r: Record<string, number> | undefined): string {
+  return Object.entries(r ?? {}).map(([c, v]) => `${c}:${v}`).join(',');
+}
+
+export function decodeRents(s: string | null | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const part of (s ?? '').split(',')) {
+    const [c, v] = part.split(':');
+    if (/^(\d{5}|2[AB]\d{3})$/.test(c ?? '') && Number.isFinite(Number(v)) && Number(v) > 0) out[c] = Number(v);
+  }
+  return out;
 }
 
 export const DEFAULT_FINANCE: Finance = {
@@ -58,10 +77,11 @@ export interface ParkingSimulation {
 /** One parking space at the commune's median DVF price, with the rent the user entered. */
 export function simulateParking(row: Row, f: Finance): ParkingSimulation | null {
   const price = row.parking_price;
-  if (typeof price !== 'number' || f.parkingRent <= 0) return null;
+  const rent = parkingRentFor(row.code, f);
+  if (typeof price !== 'number' || rent <= 0) return null;
   const notaryFees = price * f.notary;
   const totalCost = price + notaryFees;
-  const rentYear = f.parkingRent * 12;
+  const rentYear = rent * 12;
   const vacancyLoss = rentYear * (f.vacancy / 12);
   const charges = rentYear * f.charges;
   const netIncome = rentYear - vacancyLoss - charges - f.parkingTax;
@@ -153,7 +173,7 @@ export function decodeFinance(s: string | null): Finance {
   if (!s) return f;
   for (const part of s.split(',')) {
     const [k, v] = part.split(':');
-    if (k in f && Number.isFinite(Number(v))) (f as Record<string, number>)[k] = Number(v);
+    if (k in DEFAULT_FINANCE && Number.isFinite(Number(v))) (f as unknown as Record<string, number>)[k] = Number(v);
   }
   return f;
 }

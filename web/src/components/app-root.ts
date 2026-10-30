@@ -3,7 +3,10 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { compareScore, evaluate, num, type FilterDef, type Row, type Scored, type SignalDef, type Tier } from '../engine';
 import { CSV_SEP, csvValue, fmt } from '../format';
 import { VERDICT_LABEL, judge, type Verdict } from '../judge';
-import { DEFAULT_FINANCE, REFERENCE_SURFACE, decodeFinance, encodeFinance, simulate, simulateParking, withFinance, type Finance } from '../finance';
+import {
+  DEFAULT_FINANCE, REFERENCE_SURFACE, decodeFinance, decodeRents, encodeFinance, encodeRents, parkingRentFor, simulate, simulateParking,
+  withFinance, type Finance,
+} from '../finance';
 import { makeScale, type Scale } from '../scale';
 import {
   COLUMNS, DETAIL_GROUPS, FILTERS, HELP, SIGNALS, STRATEGIES, columnHelp, derive, missingDataNote, preset,
@@ -233,7 +236,7 @@ export class AppRoot extends LitElement {
     this.signals = s.signals;
     this.selected = s.selected;
     this.scopes = s.scopes ?? [];
-    this.finance = decodeFinance(s.finance ?? null);
+    this.finance = { ...decodeFinance(s.finance ?? null), parkingRents: decodeRents(s.rents) };
     this.custom = s.custom ?? [];
     this.tiers = s.tiers ?? [];
     this.columns = defaultColumns(s.strategy);
@@ -241,7 +244,7 @@ export class AppRoot extends LitElement {
 
   private pushUrl() {
     const h = encode({
-      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom, tiers: this.tiers,
+      strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom, tiers: this.tiers, rents: encodeRents(this.finance.parkingRents),
     });
     history.replaceState(null, '', `#${h}`);
   }
@@ -621,6 +624,7 @@ export class AppRoot extends LitElement {
           <section class="summary" aria-label="Réglages actifs">
             <div class="summary-text">
               <p>${st.blurb}</p>
+              ${this.renderAssumptions()}
               <div class="chips">
                 ${this.scopes.length ? html`<span class="chip strong">${this.scopeLabel}</span>` : nothing}
                 ${this.strategy !== 'land' && this.strategy !== 'parking' ? html`
@@ -750,9 +754,8 @@ export class AppRoot extends LitElement {
     const extra = this.strategy === 'live'
       ? card(val('apl_gp', med('apl_gp')), 'accès médecins médian', `${HELP.median}\n\n${columnHelp('apl_gp')}`)
       : this.strategy === 'parking'
-        ? (this.finance.parkingRent > 0
-          ? card(val('parking_gross_yield', med('parking_gross_yield')), 'rendement brut parking médian', `${HELP.median}\n\n${columnHelp('parking_gross_yield')}`)
-          : card(html`<button class="link" @click=${() => (this.settingsOpen = true)}>Indiquer un loyer</button>`, 'rendement parking', 'Saisissez le loyer mensuel d’une place dans « Filtres et poids » (hypothèses d’achat) pour calculer le rendement de chaque commune.'))
+        ? card(val('parking_gross_yield', med('parking_gross_yield')), 'rendement brut parking médian',
+            `${HELP.median}\n\n${columnHelp('parking_gross_yield')}\n\nVide tant qu’aucun loyer de place n’est indiqué (lien « Modifier » au-dessus).`)
       : this.strategy !== 'land'
         ? card(val('gross_yield', med('gross_yield')), 'rendement brut médian', `${HELP.median}\n\n${columnHelp('gross_yield')}`)
         : nothing;
@@ -1048,6 +1051,37 @@ export class AppRoot extends LitElement {
       </aside>`;
   }
 
+  /** Open the drawer on the purchase assumptions. */
+  private editAssumptions() {
+    this.settingsOpen = true;
+    this.updateComplete.then(() => this.renderRoot.querySelector('#assumptions')?.scrollIntoView({ block: 'start' }));
+  }
+
+  /** One line under the strategy blurb: the assumptions the yields on screen rely on, with a "Modifier" link. */
+  private renderAssumptions() {
+    if (!['long', 'medium', 'parking'].includes(this.strategy)) return nothing;
+    const f = this.finance;
+    const p = (v: number) => fmt('net_yield', v);
+    const credit = `apport ${p(f.deposit)} · crédit ${p(f.rate)} sur ${f.years} ans · charges ${p(f.charges)} · vacance ${f.vacancy} mois/an`;
+    const local = Object.keys(f.parkingRents ?? {}).length;
+    const head = this.strategy === 'parking'
+      ? html`${f.parkingRent > 0 ? html`place louée <b>${fmt('purchase_price', f.parkingRent)}/mois</b>` : html`<b class="warn">loyer d’une place non indiqué</b>`}
+          ${local ? html` (${local} ${local > 1 ? 'villes' : 'ville'} avec un loyer propre)` : nothing}
+          · taxe foncière ${fmt('purchase_price', f.parkingTax)}/an · `
+      : html`${this.type === 'house' ? 'maison' : 'appartement'} de ${f.surface || REFERENCE_SURFACE[this.type]} m² · `;
+    return html`
+      <p class="assume">${this.strategy === 'parking' ? 'Rendements calculés avec' : 'Rendement net et cash-flow calculés avec'} : ${head}${credit}
+        · <button class="link" @click=${() => this.editAssumptions()}>Modifier</button></p>`;
+  }
+
+  /** Set (or clear, with null) the parking rent of one commune. */
+  private setLocalRent(code: string, rent: number | null) {
+    const r = { ...(this.finance.parkingRents ?? {}) };
+    if (rent === null || rent <= 0 || rent === this.finance.parkingRent) delete r[code];
+    else r[code] = rent;
+    this.setFinance({ parkingRents: r });
+  }
+
   private setFinance(patch: Partial<Finance>) {
     this.finance = { ...this.finance, ...patch };
     this.pushUrl();
@@ -1068,7 +1102,7 @@ export class AppRoot extends LitElement {
       </label>`;
     const pct = (v: number) => Math.round(v * 1000) / 10;
     return html`
-      <h3>Hypothèses d’achat <small>rendement net et cash-flow</small> ${tip('Hypothèses d’achat', HELP.finance)}</h3>
+      <h3 id="assumptions">Hypothèses d’achat <small>rendement net et cash-flow</small> ${tip('Hypothèses d’achat', HELP.finance)}</h3>
       <div class="fingrid">
         ${field('Surface', f.surface || ref, 'm²', '1', (v) => this.setFinance({ surface: v === ref ? 0 : v }),
           `Surface du bien simulé. Par défaut ${ref} m² (${this.type === 'house' ? 'maison' : 'appartement'}), la surface de référence des loyers ANIL : au-delà, le loyer au m² réel est en général plus bas.`)}
@@ -1091,21 +1125,37 @@ export class AppRoot extends LitElement {
   /** One parking space at the commune's median price, with the rent the user entered. */
   private renderParkingSimulation(row: Row) {
     const f = this.finance;
-    const open = html`<button class="link" @click=${() => (this.settingsOpen = true)}>Modifier les hypothèses</button>`;
+    const open = html`<button class="link" @click=${() => this.editAssumptions()}>Modifier les hypothèses</button>`;
     if (typeof row.parking_price !== 'number') {
       return html`<details open class="grp"><summary>Simulation : une place</summary>
         <p class="muted">Pas assez de ventes de garages ou de places ici (moins de 5 en 3 ans) pour un prix fiable.</p></details>`;
     }
     const sim = simulateParking(row, f);
+    const own = f.parkingRents?.[row.code];
+    const rent = parkingRentFor(row.code, f);
+    const rentField = html`
+      <div class="localrent">
+        <label>Loyer d’une place à ${row.nom}
+          <span class="fval"><input type="number" min="0" step="5" .value=${rent > 0 ? String(rent) : ''} placeholder="€"
+            aria-label="Loyer mensuel d’une place à ${row.nom}"
+            @change=${(e: Event) => { const v = Number((e.target as HTMLInputElement).value); this.setLocalRent(row.code, Number.isFinite(v) && v > 0 ? v : null); }}><i>€/mois</i></span>
+        </label>
+        ${own !== undefined
+          ? html`<span class="tag">propre à cette ville</span>
+              <button class="link" @click=${() => this.setLocalRent(row.code, null)}>${f.parkingRent > 0 ? `Revenir au loyer général (${fmt('purchase_price', f.parkingRent)})` : 'Effacer'}</button>`
+          : html`<span class="muted small">${f.parkingRent > 0 ? 'loyer général' : 'aucun loyer indiqué'}</span>`}
+      </div>`;
     if (!sim) {
       return html`<details open class="grp"><summary>Simulation : une place</summary>
-        <p class="muted">Prix médian d’une place : <b>${fmt('parking_price', row.parking_price)}</b>. Indiquez le loyer mensuel d’une place pour calculer le rendement. ${open}</p></details>`;
+        <p class="muted">Prix médian d’une place : <b>${fmt('parking_price', row.parking_price)}</b> (${row.n_parking_sales} ventes en 3 ans). Indiquez le loyer d’une place ici, relevé par exemple sur les annonces de la ville, pour calculer le rendement.</p>
+        ${rentField}</details>`;
     }
     const e = (v: number) => fmt('purchase_price', Math.round(v));
     return html`
       <details open class="grp sim">
-        <summary>Simulation : une place${tip('Simulation : une place', 'Une place au prix médian DVF de la commune, louée au loyer que vous avez indiqué. Il n’existe pas de données publiques sur les loyers de parkings : vérifiez le loyer local sur les sites d’annonces.')}</summary>
-        <p class="muted">Loyer saisi : ${e(f.parkingRent)}/mois. ${open}</p>
+        <summary>Simulation : une place${tip('Simulation : une place', 'Une place au prix médian DVF de la commune, louée au loyer indiqué : celui de cette ville si vous en avez saisi un, sinon le loyer général des hypothèses d’achat. Il n’existe pas de données publiques sur les loyers de parkings : vérifiez le loyer local sur les sites d’annonces.')}</summary>
+        ${rentField}
+        <p class="muted small">Crédit, charges et vacance : hypothèses générales. ${open}</p>
         <dl>
           <dt>Prix médian (${row.n_parking_sales} ventes)</dt><dd>${e(sim.price)}</dd>
           <dt>+ Frais de notaire (${fmt('net_yield', f.notary)})</dt><dd>${e(sim.notaryFees)}</dd>
@@ -1299,6 +1349,13 @@ export class AppRoot extends LitElement {
     /* ---- summary of active settings ---- */
     .summary { display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; }
     .summary-text p { margin: 0 0 10px; color: var(--muted); max-width: 820px; font-size: 14.5px; }
+    .localrent { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+    .localrent label { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; flex-wrap: wrap; }
+    .localrent .tag { font-size: 11px; font-weight: 700; color: var(--brand-2); background: var(--brand-soft); border-radius: 999px; padding: 1px 8px; }
+    .summary-text p.assume { font-size: 12.5px; margin-top: -4px; }
+    .summary-text p.assume b { color: var(--ink-2); font-weight: 650; }
+    .summary-text p.assume b.warn { color: var(--warn); }
+    .summary-text p.assume .link { font-size: 12.5px; font-weight: 650; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .chip { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; color: var(--ink-2); }
     .chip.custom { border-color: var(--brand-2); background: var(--brand-soft); display: inline-flex; align-items: center; gap: 4px; padding-right: 4px; }
