@@ -1483,6 +1483,8 @@ export class AppRoot extends LitElement {
     .grow { flex: 1; }
     .tablewrap { overflow: auto; max-height: 70vh; }
     table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13.5px; }
+    /* Sticky headers each form a layer: lift the one whose tooltip is open above its neighbours. */
+    th:hover, th:focus-within { z-index: 4; }
     th { position: sticky; top: 0; z-index: 1; background: var(--th-bg); text-align: left; vertical-align: bottom; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
     .th { display: inline-flex; align-items: center; padding: 9px 10px; }
     th button { border: 0; background: none; padding: 0; cursor: pointer; font-weight: 650; text-align: left; color: inherit; font-size: 12px; line-height: 1.25; max-width: 130px; }
