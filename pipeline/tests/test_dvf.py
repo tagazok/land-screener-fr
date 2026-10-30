@@ -113,3 +113,23 @@ def test_remap_does_not_double_count_city_and_arrondissements():
     agg = lambda d: dict(remap(d, ARRONDISSEMENTS).group_by("code").agg(pl.col("pop").sum()).rows())
     assert agg(both) == {"75056": 100, "33063": 5}
     assert agg(only_arr) == {"75056": 100}
+
+
+def test_parking_metrics_keeps_single_outbuilding_sales():
+    import polars as pl
+
+    from lsfr.dvf import parking_metrics
+
+    def row(m, typ, price, land=None, disp="1", code="33063", date="2025-03-01"):
+        return {"id_mutation": m, "nature_mutation": "Vente", "date_mutation": date, "code_commune": code,
+                "valeur_fonciere": price, "type_local": typ, "numero_disposition": disp, "surface_terrain": land}
+
+    rows = [row(f"p{i}", "Dépendance", 20000 + i * 1000) for i in range(5)]
+    rows += [row("h", "Maison", 300000), row("h", "Dépendance", 300000)]          # house + garage: excluded
+    rows += [row("f", "Dépendance", 15000, land=2000)]                             # field with a shed: excluded
+    rows += [row("two", "Dépendance", 40000), row("two", "Dépendance", 40000)]     # two spaces: excluded
+    rows += [row("old", "Dépendance", 9000, date="2021-01-01")]                    # outside the 36 months
+    df = pl.DataFrame(rows).with_columns(pl.col("date_mutation").str.to_date(), pl.col("surface_terrain").cast(pl.Float64),
+                                         pl.col("valeur_fonciere").cast(pl.Float64))
+    out = parking_metrics(df, "2025-06-30").to_dicts()[0]
+    assert out["n_parking_sales"] == 5 and out["parking_price"] == 22000

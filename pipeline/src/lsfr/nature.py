@@ -127,3 +127,39 @@ def nearest_town(base: pl.DataFrame, min_pop: int = 3000) -> pl.DataFrame:
         "town3000_km": [0.0 if (r["pop"] or 0) >= min_pop else round(float(d) / 1000, 1) for r, d in zip(rows, dist)],
         "town3000_name": [r["nom"] if (r["pop"] or 0) >= min_pop else rows[towns[k]]["nom"] for r, k in zip(rows, j)],
     })
+
+
+def zfe(path: Path, feats: list[dict], today: str) -> pl.DataFrame:
+    """Share of each commune's area inside a low-emission zone (ZFE) restricting private cars today.
+
+    Source: base nationale consolidée des ZFE (transport.data.gouv.fr), aires.geojson. A zone counts
+    when it has a private-car rule (vp_critair) and today falls between date_debut and date_fin.
+    """
+    import json
+
+    from shapely.geometry import shape
+    from shapely.ops import transform, unary_union
+    from shapely.strtree import STRtree
+
+    zones = []
+    for f in json.loads(path.read_text())["features"]:
+        p = f["properties"]
+        start, end = (p.get("date_debut") or "")[:10], (p.get("date_fin") or "")[:10]
+        if p.get("vp_critair") and start and start <= today and (not end or end >= today):
+            g = transform(TO_L93, shape(f["geometry"]))
+            zones.append(g if g.is_valid else g.buffer(0))
+    if not zones:
+        return pl.DataFrame({"code": [], "zfe_share": []}, schema={"code": pl.Utf8, "zfe_share": pl.Float64})
+    tree = STRtree(zones)
+    rows = []
+    for f in feats:
+        geom = transform(TO_L93, shape(f["geometry"]))
+        if not geom.is_valid:
+            geom = geom.buffer(0)
+        hits = [zones[i] for i in tree.query(geom)]
+        if not hits or geom.area == 0:
+            continue
+        share = geom.intersection(unary_union(hits)).area / geom.area
+        if share > 0.001:
+            rows.append({"code": f["properties"]["code"], "zfe_share": min(1.0, share)})
+    return pl.DataFrame(rows, schema={"code": pl.Utf8, "zfe_share": pl.Float64})

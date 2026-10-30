@@ -3,7 +3,7 @@
 
 import type { FilterDef, Row, SignalDef } from './engine';
 
-export type StrategyId = 'long' | 'medium' | 'short' | 'live' | 'land';
+export type StrategyId = 'long' | 'medium' | 'short' | 'live' | 'land' | 'parking';
 export type PropertyType = 'house' | 'apt';
 
 export interface ColumnInfo {
@@ -56,6 +56,37 @@ export const COLUMNS: Record<string, ColumnInfo> = {
     label: 'Prix sur 3 ans', unit: 'pct',
     def: 'Évolution du prix médian au m² en 3 ans, maisons et appartements confondus.',
     calc: 'médiane des ventes de 2025 comparée à la médiane des ventes de 2022. Vide s’il y a moins de 10 ventes dans l’une des deux années.',
+  },
+  parking_price: {
+    label: 'Prix d’un parking/garage', unit: 'eur',
+    def: 'Prix médian d’un garage, box ou place de parking vendu seul, sur les 36 derniers mois.',
+    calc: 'source DVF. Ventes dont le seul local est une « dépendance » unique, sans terrain de plus de 100 m², entre 1 000 et 150 000 €. DVF ne distingue pas un garage d’une cave ou d’un cellier, qui sont comptés aussi : la médiane peut être un peu basse. Vide s’il y a moins de 5 ventes.',
+  },
+  n_parking_sales: { label: 'Ventes de parkings (3 ans)', unit: 'count', def: 'Nombre de garages, places ou dépendances vendus seuls sur 36 mois.', calc: 'source DVF, même sélection que le prix.' },
+  parking_gross_yield: {
+    label: 'Rendement brut parking', unit: 'pct',
+    def: 'Loyer annuel d’une place (celui que vous avez indiqué) ÷ prix médian d’une place dans la commune.',
+    calc: 'loyer mensuel saisi × 12 ÷ prix médian DVF. Il n’existe pas de données publiques sur les loyers de parkings : vérifiez les loyers locaux sur les sites d’annonces.',
+  },
+  parking_net_yield: {
+    label: 'Rendement net parking', unit: 'pct',
+    def: 'Rendement après vacance, charges, taxe foncière, frais de notaire compris.',
+    calc: '(loyer annuel − vacance − charges − taxe foncière saisie) ÷ (prix + frais de notaire). Hypothèses dans « Filtres et poids ».',
+  },
+  parking_cashflow_month: { label: 'Cash-flow parking/mois', unit: 'eur', def: 'Revenu net mensuel d’une place moins la mensualité du crédit.', calc: 'mêmes hypothèses de crédit que pour un logement.' },
+  car_share: { label: 'Ménages avec voiture', unit: 'pct', def: 'Part des ménages disposant d’au moins une voiture.', calc: 'recensement INSEE 2023 (résidences principales).' },
+  parking_spot_share: { label: 'Ménages avec place', unit: 'pct', def: 'Part des ménages disposant d’au moins une place de stationnement réservée (garage, box, place).', calc: 'recensement INSEE 2023.' },
+  cars_per_household: { label: 'Voitures par ménage', unit: 'num', def: 'Nombre moyen de voitures par ménage (au moins).', calc: 'recensement INSEE 2023 : ménages avec 1 voiture ou plus + ménages avec 2 ou plus (comptés pour 2), ÷ ménages.' },
+  parking_gap_share: {
+    label: 'Ménages avec voiture sans place', unit: 'pct',
+    def: 'Estimation de la part des ménages qui ont une voiture mais pas de place réservée : la demande potentielle de location de parkings.',
+    calc: '(ménages avec voiture − ménages avec place) ÷ ménages, recensement INSEE 2023. L’INSEE ne publie pas le croisement : on suppose que les ménages avec place ont une voiture, ce qui sous-estime un peu le manque.',
+  },
+  parking_gap: { label: 'Ménages avec voiture sans place', unit: 'count', def: 'Nombre estimé de ménages avec voiture mais sans place réservée.', calc: 'voir la part.' },
+  zfe_share: {
+    label: 'Zone à faibles émissions', unit: 'pct',
+    def: 'Part du territoire de la commune dans une zone à faibles émissions (ZFE) qui restreint aujourd’hui les voitures particulières.',
+    calc: 'base nationale consolidée des ZFE (transport.data.gouv.fr), règles en vigueur à la date de construction des données. Les ZFE évoluent souvent (dates, critères, suppressions) : vérifiez auprès de la métropole.',
   },
   price_trend_house: {
     label: 'Prix maisons 2022→2025', unit: 'pct',
@@ -686,6 +717,32 @@ export const STRATEGIES: Strategy[] = [
     ],
     table: ['land_price_m2', 'n_land_sales', 'pop_cagr_11y', 'clay_high_share', 'drought_days_avg', 'risk_count', 'services_km'],
   },
+  {
+    id: 'parking',
+    label: 'Parking / garage',
+    blurb: 'Acheter une place de parking ou un garage pour le louer. Privilégie les communes où beaucoup de ménages ont une voiture sans place, et les places bon marché. Indiquez le loyer d’une place dans « Filtres et poids » pour obtenir le rendement.',
+    type: 'apt',
+    filters: [
+      f('parkingdata', 'parking_price', 'min', 0, true, true),
+      f('parkingsales', 'n_parking_sales', 'min', 10),
+      f('pkyield', 'parking_gross_yield', 'min', 0.06, false, true),
+      f('pkgap', 'parking_gap_share', 'min', 0.1, false),
+      f('flood', 'ppr_flood', 'isFalse', undefined, false),
+      f('floodcat', 'catnat_flood', 'max', 2, false),
+      f('tax', 'tfpb_rate', 'max', 45, false),
+      f('zfeout', 'zfe_share', 'max', 0, false),
+    ],
+    signals: [
+      s('pkyield', 'parking_gross_yield', 1, 3),
+      s('pkgap', 'parking_gap_share', 1, 3),
+      s('pkprice', 'parking_price', -1, 2),
+      s('density', 'density', 1, 1),
+      s('growth', 'pop_cagr_11y', 1, 1),
+      s('students', 'students_per_1000', 1, 1),
+      s('tax', 'tfpb_rate', -1, 1),
+    ],
+    table: ['parking_price', 'n_parking_sales', 'parking_gross_yield', 'parking_net_yield', 'parking_gap_share', 'parking_spot_share', 'car_share', 'density', 'tfpb_rate', 'catnat_flood', 'zfe_share'],
+  },
 ];
 
 // Every strategy gets a population range (min and max inhabitants) at the top of its filters.
@@ -817,6 +874,34 @@ export const FILTERS: Record<string, { label: string; help: string }> = {
     label: 'Secteurs de sols pollués (SIS) max.',
     help: 'Élimine les communes qui ont plus que ce nombre de secteurs d’information sur les sols, c’est-à-dire de terrains où une pollution est connue de l’État. Avec 0 : aucune commune ayant un tel terrain.',
   },
+  parkingdata: {
+    label: 'Avec des ventes de parkings',
+    help: 'Garde seulement les communes où au moins 5 garages ou places de parking se sont vendus seuls en 3 ans, pour avoir un prix fiable.',
+  },
+  parkingsales: {
+    label: 'Ventes de parkings min. (3 ans)',
+    help: 'Élimine les communes avec trop peu de ventes de garages ou places : le prix médian y est fragile, et revendre peut prendre du temps.',
+  },
+  pkyield: {
+    label: 'Rendement brut parking minimum',
+    help: 'Élimine les communes où le loyer que vous avez indiqué rapporte moins que ce pourcentage du prix médian d’une place. Nécessite un loyer de place dans les hypothèses d’achat.',
+  },
+  pkgap: {
+    label: 'Ménages sans place min. (%)',
+    help: 'Garde les communes où la part estimée de ménages ayant une voiture mais pas de place réservée dépasse ce seuil : c’est la demande de location.',
+  },
+  floodcat: {
+    label: 'Arrêtés inondation maximum',
+    help: 'Élimine les communes ayant connu plus d’arrêtés de catastrophe naturelle « inondation » que ce nombre depuis 1982. Important pour un parking souterrain.',
+  },
+  tax: {
+    label: 'Taux de taxe foncière max. (%)',
+    help: 'Élimine les communes dont le taux de taxe foncière (bâti) dépasse ce seuil. Un garage paie la taxe foncière comme un logement, sur une petite base.',
+  },
+  zfeout: {
+    label: 'Hors zone à faibles émissions',
+    help: 'Élimine les communes dont une partie est dans une ZFE qui restreint les voitures particulières. Une ZFE peut faire baisser le nombre de voitures à terme, ou au contraire pousser à garer les voitures récentes ; à vous de juger.',
+  },
   forestaround: {
     label: 'Forêt autour minimum (%)',
     help: 'Garde les communes où au moins ce pourcentage du territoire dans un rayon d’environ 5 km est couvert d’arbres : des bois à portée de promenade.',
@@ -852,6 +937,9 @@ export const FILTERS: Record<string, { label: string; help: string }> = {
 };
 
 export const SIGNALS: Record<string, { label: string; help: string }> = {
+  pkyield: { label: 'Rendement parking', help: 'Plus le rendement brut d’une place (avec votre loyer) est élevé, meilleur est le score. Ignoré tant qu’aucun loyer n’est saisi.' },
+  pkgap: { label: 'Manque de places', help: 'Plus la part de ménages avec voiture mais sans place est forte, meilleur est le score : c’est la demande.' },
+  pkprice: { label: 'Place bon marché', help: 'Plus le prix médian d’une place est bas, meilleur est le score : un ticket d’entrée plus faible.' },
   yield: { label: 'Rendement brut', help: 'Plus le rendement brut est élevé, meilleur est le score.' },
   growth: { label: 'Croissance démographique', help: 'Plus la population augmente vite, meilleur est le score.' },
   vacancy: { label: 'Faible vacance', help: 'Moins il y a de logements vides, meilleur est le score : les locataires se trouvent plus facilement.' },
@@ -890,6 +978,7 @@ export const SIGNALS: Record<string, { label: string; help: string }> = {
 export const DETAIL_GROUPS: { title: string; help?: string; columns: string[] }[] = [
   { title: 'Marché', columns: ['price_m2', 'n_sales', 'price_trend_3y', 'price_trend_house', 'price_trend_apt', 'rent_m2', 'rent_confidence', 'gross_yield', 'net_yield', 'cashflow_month', 'land_price_m2', 'n_land_sales'] },
   { title: 'Demande locative', columns: ['tenant_share', 'private_rent_share', 'furnished_share', 'social_share', 'unemployment_rate', 'jobs', 'jobs_per_active', 'students', 'students_per_1000'] },
+  { title: 'Parking et stationnement', help: 'Prix des places vendues seules (DVF) et équipement des ménages (recensement 2023). Le rendement utilise le loyer de place que vous saisissez dans « Filtres et poids ».', columns: ['parking_price', 'n_parking_sales', 'parking_gross_yield', 'parking_net_yield', 'parking_cashflow_month', 'parking_gap_share', 'parking_gap', 'car_share', 'parking_spot_share', 'cars_per_household', 'zfe_share'] },
   { title: 'Énergie des logements', columns: ['dpe_fg_share', 'dpe_g_share', 'dpe_count'] },
   { title: 'Habitants', columns: ['pop', 'pop_cagr_11y', 'density', 'median_income', 'vacancy_rate', 'town3000_km', 'town3000_name', 'aav_category', 'aav_name', 'aav_size'] },
   { title: 'Tourisme', columns: ['tourist_beds_per_1000', 'tour_beds_change', 'tour_beds_added', 'second_home_share', 'second_homes_2022', 'second_homes_change', 'second_home_share_change'] },

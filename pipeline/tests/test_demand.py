@@ -44,3 +44,17 @@ def test_census_shares(tmp_path):
     r = demand.census(p, ["33"], {}).to_dicts()[0]
     assert r["tenant_share"] == 0.4 and r["social_share"] == 0.1
     assert r["unemployment_rate"] == 0.1 and r["jobs_per_active"] == 1.5
+
+
+def test_census_parking_gap(tmp_path):
+    import json
+
+    p = tmp_path / "rp.json"
+    base = {"rp_main": 100, "rp_tenants": 40, "rp_private_rent": 25, "rp_furnished": 5, "rp_social": 10,
+            "active_15_64": 50, "unemployed_15_64": 5, "jobs": 75, "rp_cars_ge1": 80, "rp_cars_ge2": 30, "rp_with_spot": 50}
+    p.write_text(json.dumps({k: {"33001": v, "33002": v if k != "rp_with_spot" else 95} for k, v in base.items()}))
+    r = {x["code"]: x for x in demand.census(p, ["33"], {}).to_dicts()}
+    assert r["33001"]["car_share"] == 0.8 and r["33001"]["cars_per_household"] == 1.1
+    assert r["33001"]["parking_gap"] == 30 and r["33001"]["parking_gap_share"] == 0.3
+    # More spots than car households: no deficit, never negative.
+    assert r["33002"]["parking_gap"] == 0

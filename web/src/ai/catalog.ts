@@ -64,6 +64,8 @@ export const CONCEPTS: { words: RegExp; text: string; columns: string[] }[] = [
   { words: /risque|risk/i, columns: ['risk_count'], text: 'risques signalés = risk_count (0 à 9)' },
   { words: /prix|cher|coût|cout|baiss|hausse|appart|maison|price/i, columns: ['price_m2', 'price_trend_house', 'price_trend_apt', 'price_trend_3y'],
     text: 'prix des appartements en baisse sur 3 ans = price_trend_apt max 0 ; maisons = price_trend_house max 0' },
+  { words: /parking|garage|box|stationnement|place de|voiture/i, columns: ['parking_price', 'n_parking_sales', 'parking_gross_yield', 'parking_gap_share', 'car_share', 'parking_spot_share', 'zfe_share'],
+    text: 'investir dans un parking/garage = strategy "parking" ; demande = parking_gap_share min 10 ; prix d’une place = parking_price ; rendement parking = parking_gross_yield (nécessite un loyer saisi)' },
   { words: /rendement|rentab|loyer|invest|cash/i, columns: ['gross_yield', 'net_yield', 'cashflow_month', 'rent_m2'], text: 'rendement en %' },
   { words: /médecin|medecin|santé|sante|service|école|ecole/i, columns: ['apl_gp', 'services_km', 'college_ips'], text: 'désert médical = apl_gp < 2.5' },
   { words: /crime|cambriol|sécurité|securite|violence/i, columns: ['crime_burglary', 'crime_violence'], text: 'pour 1000 logements / habitants' },

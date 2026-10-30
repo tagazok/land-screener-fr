@@ -27,10 +27,13 @@ const raw: Row[] = Array.from({ length: data.n }, (_, i) => {
 });
 
 type Fit = { pass: boolean; why: string[] };
+// The AI summaries were written for these five strategies: newer ones (parking) are left out so the
+// summary cache stays valid.
+const SUMMARY_STRATEGIES = STRATEGIES.filter((s) => ['long', 'medium', 'short', 'live', 'land'].includes(s.id));
 const out: Record<string, Record<string, Fit>> = {};
 const counts: Record<string, number> = {};
 
-for (const st of STRATEGIES) {
+for (const st of SUMMARY_STRATEGIES) {
   const rows = derive(raw, st.type);
   const active = st.filters.filter((f) => f.enabled);
   let n = 0;
@@ -54,6 +57,6 @@ for (const st of STRATEGIES) {
 }
 
 const target = resolve(root, '../raw/ai/strategy-fit.json');
-writeFileSync(target, JSON.stringify({ strategies: STRATEGIES.map((s) => ({ id: s.id, label: s.label, type: s.type })), fit: out }));
+writeFileSync(target, JSON.stringify({ strategies: SUMMARY_STRATEGIES.map((s) => ({ id: s.id, label: s.label, type: s.type })), fit: out }));
 console.log(`wrote ${Object.keys(out).length} communes -> ${target}`);
 console.log('communes passing each strategy:', counts);

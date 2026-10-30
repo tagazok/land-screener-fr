@@ -21,6 +21,10 @@ export interface Finance {
   charges: number;
   /** Months per year without a tenant. */
   vacancy: number;
+  /** Rent of one parking space or garage, €/month; 0 = not set (no public data on parking rents). */
+  parkingRent: number;
+  /** Property tax of one parking space, €/year (unknown per commune: entered by the user). */
+  parkingTax: number;
 }
 
 export const DEFAULT_FINANCE: Finance = {
@@ -31,7 +35,43 @@ export const DEFAULT_FINANCE: Finance = {
   notary: 0.075,
   charges: 0.15,
   vacancy: 1,
+  parkingRent: 0,
+  parkingTax: 0,
 };
+
+export interface ParkingSimulation {
+  price: number;
+  notaryFees: number;
+  totalCost: number;
+  rentYear: number;
+  vacancyLoss: number;
+  charges: number;
+  propertyTax: number;
+  netIncome: number;
+  grossYield: number;
+  netYield: number;
+  loan: number;
+  monthlyPayment: number;
+  cashflowMonth: number;
+}
+
+/** One parking space at the commune's median DVF price, with the rent the user entered. */
+export function simulateParking(row: Row, f: Finance): ParkingSimulation | null {
+  const price = row.parking_price;
+  if (typeof price !== 'number' || f.parkingRent <= 0) return null;
+  const notaryFees = price * f.notary;
+  const totalCost = price + notaryFees;
+  const rentYear = f.parkingRent * 12;
+  const vacancyLoss = rentYear * (f.vacancy / 12);
+  const charges = rentYear * f.charges;
+  const netIncome = rentYear - vacancyLoss - charges - f.parkingTax;
+  const loan = totalCost * (1 - f.deposit);
+  const mp = monthlyPayment(loan, f.rate, f.years);
+  return {
+    price, notaryFees, totalCost, rentYear, vacancyLoss, charges, propertyTax: f.parkingTax, netIncome,
+    grossYield: rentYear / price, netYield: netIncome / totalCost, loan, monthlyPayment: mp, cashflowMonth: netIncome / 12 - mp,
+  };
+}
 
 /** ANIL rent references: the rent per m² is predicted for these sizes. */
 export const REFERENCE_SURFACE = { house: 92, apt: 52 } as const;
@@ -89,11 +129,15 @@ export function simulate(row: Row, type: 'house' | 'apt', f: Finance): Simulatio
 export function withFinance(rows: Row[], type: 'house' | 'apt', f: Finance): Row[] {
   return rows.map((r) => {
     const s = simulate(r, type, f);
+    const p = simulateParking(r, f);
     return {
       ...r,
       purchase_price: s ? Math.round(s.totalCost) : null,
       net_yield: s ? s.netYield : null,
       cashflow_month: s ? Math.round(s.cashflowMonth) : null,
+      parking_gross_yield: p ? p.grossYield : null,
+      parking_net_yield: p ? p.netYield : null,
+      parking_cashflow_month: p ? Math.round(p.cashflowMonth) : null,
     };
   });
 }

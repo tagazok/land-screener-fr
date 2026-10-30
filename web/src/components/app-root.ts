@@ -3,7 +3,7 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { compareScore, evaluate, num, type FilterDef, type Row, type Scored, type SignalDef, type Tier } from '../engine';
 import { CSV_SEP, csvValue, fmt } from '../format';
 import { VERDICT_LABEL, judge, type Verdict } from '../judge';
-import { DEFAULT_FINANCE, REFERENCE_SURFACE, decodeFinance, encodeFinance, simulate, withFinance, type Finance } from '../finance';
+import { DEFAULT_FINANCE, REFERENCE_SURFACE, decodeFinance, encodeFinance, simulate, simulateParking, withFinance, type Finance } from '../finance';
 import { makeScale, type Scale } from '../scale';
 import {
   COLUMNS, DETAIL_GROUPS, FILTERS, HELP, SIGNALS, STRATEGIES, columnHelp, derive, missingDataNote, preset,
@@ -580,6 +580,7 @@ export class AppRoot extends LitElement {
   private filterChip(f: FilterDef): string {
     const col = COLUMNS[f.column]?.label ?? f.column;
     if (f.id === 'landdata') return 'Avec ventes de terrains';
+    if (f.id === 'parkingdata') return 'Avec ventes de parkings';
     if (f.op === 'isFalse') return `Sans : ${col.toLowerCase()}`;
     if (f.op === 'isTrue') return col;
     const v = fmt(f.column, f.value ?? null);
@@ -622,7 +623,7 @@ export class AppRoot extends LitElement {
               <p>${st.blurb}</p>
               <div class="chips">
                 ${this.scopes.length ? html`<span class="chip strong">${this.scopeLabel}</span>` : nothing}
-                ${this.strategy !== 'land' ? html`
+                ${this.strategy !== 'land' && this.strategy !== 'parking' ? html`
                   <div class="seg" role="radiogroup" aria-label="Type de bien">
                     ${(['house', 'apt'] as PropertyType[]).map((t) => html`
                       <button role="radio" aria-checked=${this.type === t} class=${this.type === t ? 'on' : ''} @click=${() => this.setType(t)}>
@@ -725,7 +726,7 @@ export class AppRoot extends LitElement {
           <span>${info.label}</span>
         </label>
         ${tip(info.label, help)}
-        ${(f.op === 'min' || f.op === 'max') && f.id !== 'landdata' ? html`
+        ${(f.op === 'min' || f.op === 'max') && f.id !== 'landdata' && f.id !== 'parkingdata' ? html`
           <span class="fval">
             <input type="number" step=${isPct ? '0.5' : 'any'} .value=${String(shown ?? '')} ?disabled=${!f.enabled}
               aria-label=${info.label}
@@ -743,11 +744,15 @@ export class AppRoot extends LitElement {
       const v = passing.map((r) => num(r.row[col])).filter((x): x is number => x !== null).sort((a, b) => a - b);
       return v.length ? v[Math.floor(v.length / 2)] : null;
     };
-    const priceCol = this.strategy === 'land' ? 'land_price_m2' : 'price_m2';
+    const priceCol = this.strategy === 'land' ? 'land_price_m2' : this.strategy === 'parking' ? 'parking_price' : 'price_m2';
     const card = (value: unknown, label: string, help: string) => html`
       <div class="stat"><span class="label">${label}${tip(label, help)}</span><b>${value}</b></div>`;
     const extra = this.strategy === 'live'
       ? card(val('apl_gp', med('apl_gp')), 'accès médecins médian', `${HELP.median}\n\n${columnHelp('apl_gp')}`)
+      : this.strategy === 'parking'
+        ? (this.finance.parkingRent > 0
+          ? card(val('parking_gross_yield', med('parking_gross_yield')), 'rendement brut parking médian', `${HELP.median}\n\n${columnHelp('parking_gross_yield')}`)
+          : card(html`<button class="link" @click=${() => (this.settingsOpen = true)}>Indiquer un loyer</button>`, 'rendement parking', 'Saisissez le loyer mensuel d’une place dans « Filtres et poids » (hypothèses d’achat) pour calculer le rendement de chaque commune.'))
       : this.strategy !== 'land'
         ? card(val('gross_yield', med('gross_yield')), 'rendement brut médian', `${HELP.median}\n\n${columnHelp('gross_yield')}`)
         : nothing;
@@ -1028,7 +1033,7 @@ export class AppRoot extends LitElement {
               ${adLinks(row).map((l) => html`<a href=${l.url} target="_blank" rel="noopener noreferrer">${l.label} ↗</a>`)}
             </div>` : nothing}
           ${this.detailWarnings(row)}
-          ${this.renderSimulation(row)}
+          ${this.strategy === 'parking' ? this.renderParkingSimulation(row) : this.renderSimulation(row)}
           ${this.renderHistory(row)}
           ${this.renderTourism(row)}
 
@@ -1074,8 +1079,48 @@ export class AppRoot extends LitElement {
         ${field('Charges et entretien', pct(f.charges), '% loyer', '1', (v) => this.setFinance({ charges: v / 100 }),
           'Charges de copropriété non récupérables, entretien, assurance propriétaire non occupant, gestion éventuelle. 10 à 20 % du loyer selon le bien.')}
         ${field('Vacance', f.vacancy, 'mois/an', '0.5', (v) => this.setFinance({ vacancy: Math.min(12, v) }), 'Nombre moyen de mois par an sans locataire.')}
+        ${this.strategy === 'parking' ? html`
+          ${field('Loyer d’une place', f.parkingRent, '€/mois', '5', (v) => this.setFinance({ parkingRent: v }),
+            'Loyer mensuel d’une place ou d’un garage, à relever sur les annonces locales : aucune donnée publique ne le fournit. Le même loyer est appliqué à toutes les communes : comparez des communes d’un même marché, ou ajustez-le.')}
+          ${field('Taxe foncière place', f.parkingTax, '€/an', '10', (v) => this.setFinance({ parkingTax: v }),
+            'Taxe foncière d’une place ou d’un garage. Souvent quelques dizaines d’euros par an ; elle figure dans l’annonce ou l’avis du vendeur.')}` : nothing}
       </div>
       <button class="link" @click=${() => this.setFinance({ ...DEFAULT_FINANCE })}>Hypothèses par défaut</button>`;
+  }
+
+  /** One parking space at the commune's median price, with the rent the user entered. */
+  private renderParkingSimulation(row: Row) {
+    const f = this.finance;
+    const open = html`<button class="link" @click=${() => (this.settingsOpen = true)}>Modifier les hypothèses</button>`;
+    if (typeof row.parking_price !== 'number') {
+      return html`<details open class="grp"><summary>Simulation : une place</summary>
+        <p class="muted">Pas assez de ventes de garages ou de places ici (moins de 5 en 3 ans) pour un prix fiable.</p></details>`;
+    }
+    const sim = simulateParking(row, f);
+    if (!sim) {
+      return html`<details open class="grp"><summary>Simulation : une place</summary>
+        <p class="muted">Prix médian d’une place : <b>${fmt('parking_price', row.parking_price)}</b>. Indiquez le loyer mensuel d’une place pour calculer le rendement. ${open}</p></details>`;
+    }
+    const e = (v: number) => fmt('purchase_price', Math.round(v));
+    return html`
+      <details open class="grp sim">
+        <summary>Simulation : une place${tip('Simulation : une place', 'Une place au prix médian DVF de la commune, louée au loyer que vous avez indiqué. Il n’existe pas de données publiques sur les loyers de parkings : vérifiez le loyer local sur les sites d’annonces.')}</summary>
+        <p class="muted">Loyer saisi : ${e(f.parkingRent)}/mois. ${open}</p>
+        <dl>
+          <dt>Prix médian (${row.n_parking_sales} ventes)</dt><dd>${e(sim.price)}</dd>
+          <dt>+ Frais de notaire (${fmt('net_yield', f.notary)})</dt><dd>${e(sim.notaryFees)}</dd>
+          <dt><b>= Coût total</b></dt><dd><b>${e(sim.totalCost)}</b></dd>
+          <dt>Loyer annuel</dt><dd>${e(sim.rentYear)}</dd>
+          <dt><b>Rendement brut</b>${colTip('parking_gross_yield')}</dt><dd>${val('parking_gross_yield', sim.grossYield)}</dd>
+          <dt>− Vacance (${f.vacancy} mois/an)</dt><dd>${e(-sim.vacancyLoss)}</dd>
+          <dt>− Charges et entretien (${fmt('net_yield', f.charges)})</dt><dd>${e(-sim.charges)}</dd>
+          <dt>− Taxe foncière</dt><dd>${e(-sim.propertyTax)}</dd>
+          <dt><b>Rendement net</b>${colTip('parking_net_yield')}</dt><dd>${val('parking_net_yield', sim.netYield)}</dd>
+          <dt>Mensualité (${fmt('net_yield', f.rate)}, ${f.years} ans)</dt><dd>${e(-sim.monthlyPayment)}</dd>
+          <dt><b>Cash-flow mensuel</b></dt><dd>${val('parking_cashflow_month', Math.round(sim.cashflowMonth))}</dd>
+        </dl>
+        <p class="muted small">Un parking loué seul relève du Code civil : loyer libre, pas de DPE. Les charges de copropriété d’une place varient beaucoup : ajustez « Charges et entretien ».</p>
+      </details>`;
   }
 
   /** Step-by-step purchase simulation for the selected commune. */

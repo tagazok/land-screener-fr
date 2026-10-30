@@ -35,6 +35,16 @@ def census(path: Path, depts: list[str], x: dict) -> pl.DataFrame:
         (pl.col("unemployed_15_64") / pl.col("active_15_64")).alias("unemployment_rate"),
         pl.col("jobs").alias("jobs"),
         (pl.col("jobs") / pl.col("active_15_64")).alias("jobs_per_active"),
+        # Parking demand. INSEE gives only margins (households with a car / with a reserved spot),
+        # so the deficit is an estimate: car households minus households with a spot, assuming
+        # every household with a spot has a car (it underestimates where spots go unused).
+        *((
+            (pl.col("rp_cars_ge1") / main).alias("car_share"),
+            (pl.col("rp_with_spot") / main).alias("parking_spot_share"),
+            ((pl.col("rp_cars_ge1") + pl.col("rp_cars_ge2")) / main).alias("cars_per_household"),
+            ((pl.col("rp_cars_ge1") - pl.col("rp_with_spot")).clip(lower_bound=0) / main).alias("parking_gap_share"),
+            (pl.col("rp_cars_ge1") - pl.col("rp_with_spot")).clip(lower_bound=0).alias("parking_gap"),
+        ) if {"rp_cars_ge1", "rp_cars_ge2", "rp_with_spot"} <= set(keys) else ()),
     )
 
 
