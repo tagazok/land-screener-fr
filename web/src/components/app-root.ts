@@ -132,6 +132,8 @@ export class AppRoot extends LitElement {
   @state() private summaryDeps: Record<string, 'loading' | 'done'> = {};
   /** Megabytes of commune data received so far; null once the data is loaded. */
   @state() private loadingMb: number | null = 0;
+  /** Size of the commune data in megabytes, when the server tells it; null = unknown. */
+  @state() private loadingTotalMb: number | null = null;
   @state() private error: string | null = null;
   @state() private copied = false;
   /** Favourite communes (this browser only). */
@@ -198,6 +200,10 @@ export class AppRoot extends LitElement {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`${url} : HTTP ${r.status}`);
     if (!r.body) return r.json();
+    // The reader counts decompressed bytes: Content-Length is only the total when the file is not compressed
+    // (GitHub Pages compresses it, so the total is then unknown and the bar shows activity instead).
+    const len = Number(r.headers.get('content-length'));
+    this.loadingTotalMb = !r.headers.get('content-encoding') && len > 0 ? len / 1e6 : null;
     const reader = r.body.getReader();
     const chunks: Uint8Array[] = [];
     let got = 0;
@@ -755,9 +761,12 @@ export class AppRoot extends LitElement {
           <span class="spinner" aria-hidden="true"></span>
           <div>
             <b>Chargement des données des communes…</b>
-            <small>${this.loadingMb > 0.05 ? `${this.loadingMb.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} Mo sur environ 30 Mo reçus` : 'Connexion…'}
-              · quelques secondes sur une bonne connexion</small>
-            <progress max="30" value=${Math.min(30, this.loadingMb)}></progress>
+            <small>${this.loadingMb > 0.05
+              ? `${this.loadingMb.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} Mo${this.loadingTotalMb ? ` sur ${this.loadingTotalMb.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} Mo` : ''} reçus`
+              : 'Connexion…'} · quelques secondes sur une bonne connexion</small>
+            ${this.loadingTotalMb
+              ? html`<progress max=${this.loadingTotalMb} value=${Math.min(this.loadingTotalMb, this.loadingMb)}></progress>`
+              : html`<progress></progress>`}
           </div>
         </div>` : nothing}
     `;
