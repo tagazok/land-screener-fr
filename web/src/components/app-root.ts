@@ -67,6 +67,8 @@ const TIER_TEXT: Record<string, string> = { A: '#fff', B: '#14361f', C: '#3b4a1a
 const PAGE = 200;
 
 /** Key figures in the box beside the map on the printed sheet. */
+/** Strengths and weaknesses kept on page 1 of the printed sheet (each list); the rest are in its tables. */
+const PRINT_HIGHLIGHTS = 8;
 const PRINT_KPIS = ['price_m2', 'gross_yield', 'pop_cagr_11y', 'median_income', 'apl_gp', 'risk_count', 'station_km', 'bigcity_train_min'];
 
 /** communes.json is columnar ({n, cols: {name: values[]}}): turn it into row objects once. */
@@ -1106,6 +1108,25 @@ export class AppRoot extends LitElement {
     return { good, bad };
   }
 
+  /** One strengths or weaknesses list; items past the printed top get class "pextra" (hidden on paper). */
+  private hlItems(row: Row, cols: string[]) {
+    const top = this.printTop(row, cols);
+    const extra = cols.length - top.size;
+    return html`${cols.map((c) => html`<li class="${judge(c, row[c]) ?? ''} ${top.has(c) ? '' : 'pextra'}"><span>${COLUMNS[c].label}</span><b>${fmt(c, row[c])}</b></li>`)}
+      ${extra > 0 ? html`<li class="printonly pmore">et ${extra} autre${extra > 1 ? 's' : ''}, dans les tableaux</li>` : nothing}`;
+  }
+
+  /**
+   * The highlights the printed sheet keeps (at most `n`): the strategy's weighted criteria first,
+   * then its table columns, then the rest; red before orange among weaknesses. Screen order is unchanged.
+   */
+  private printTop(row: Row, cols: string[], n = PRINT_HIGHLIGHTS): Set<string> {
+    const st = STRATEGIES.find((s) => s.id === this.strategy);
+    const prio = [...[...this.signals].filter((s) => s.weight > 0).sort((a, b) => b.weight - a.weight).map((s) => s.column), ...(st?.table ?? [])];
+    const rank = (c: string) => (judge(c, row[c]) === 'warn' ? 1e4 : 0) + (prio.includes(c) ? prio.indexOf(c) : 1e3);
+    return new Set([...cols].sort((a, b) => rank(a) - rank(b)).slice(0, n));
+  }
+
   private renderDetail(r: Scored) {
     const row = r.row;
     const hl = this.highlights(row);
@@ -1159,13 +1180,16 @@ export class AppRoot extends LitElement {
               <p class="muted"><span class="spinner small" aria-hidden="true"></span> Chargement du résumé…</p>
             </section>` : nothing}
 
+          <div class="p1">
           ${hl.good.length || hl.bad.length ? html`
             <div class="hl">
               ${hl.good.length ? html`<div class="hl-col good"><h4>Points forts</h4>
-                <ul>${hl.good.map((c) => html`<li><span>${COLUMNS[c].label}</span><b>${fmt(c, row[c])}</b></li>`)}</ul></div>` : nothing}
+                <ul>${this.hlItems(row, hl.good)}</ul></div>` : nothing}
               ${hl.bad.length ? html`<div class="hl-col bad"><h4>Points faibles</h4>
-                <ul>${hl.bad.map((c) => html`<li class=${judge(c, row[c]) ?? ''}><span>${COLUMNS[c].label}</span><b>${fmt(c, row[c])}</b></li>`)}</ul></div>` : nothing}
+                <ul>${this.hlItems(row, hl.bad)}</ul></div>` : nothing}
             </div>` : nothing}
+          <div class="printonly p1sim">${this.strategy === 'parking' ? this.renderParkingSimulation(row) : this.renderSimulation(row)}</div>
+          </div>
 
           <div class="sn-more">
           ${r.pass ? html`
@@ -1187,7 +1211,7 @@ export class AppRoot extends LitElement {
               ${adLinks(row).map((l) => html`<a href=${l.url} target="_blank" rel="noopener noreferrer">${l.label} ↗</a>`)}
             </div>` : nothing}
           ${this.detailWarnings(row)}
-          ${this.strategy === 'parking' ? this.renderParkingSimulation(row) : this.renderSimulation(row)}
+          <div class="screensim">${this.strategy === 'parking' ? this.renderParkingSimulation(row) : this.renderSimulation(row)}</div>
           ${this.renderHistory(row)}
           <details class="grp addr" @toggle=${(e: Event) => { if (!(e.target as HTMLDetailsElement).open) this.mapView?.mark(null); }}>
             <summary>Risques à une adresse${tip('Risques à une adresse', 'Tapez une adresse de la commune : l’application interroge Géorisques (Ministère de la Transition écologique) et affiche les risques à ce point précis, à côté de ceux de la commune. C’est la même source que l’état des risques d’une vente, mais ce n’est pas un document officiel.')}</summary>
@@ -1762,7 +1786,7 @@ export class AppRoot extends LitElement {
 
     /* ---- print: the commune sheet, or the comparison page, alone on paper ---- */
     .printonly { display: none; }
-    .sn-more { display: contents; }
+    .sn-more, .p1, .screensim { display: contents; }
     @media print {
       :host { --shadow: none; --bg: #fff; background: #fff; min-height: 0; font-size: 9pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       header, ai-chat, .loading, .backdrop, .drawer, .close, .sn-acts, .ads, .sn-score, .code, info-tip,
@@ -1800,7 +1824,12 @@ export class AppRoot extends LitElement {
       .ai { padding: 8px 11px; break-inside: avoid; }
       .ai p { font-size: 9pt; line-height: 1.45; margin-top: 3px; }
       .failbox { font-size: 9pt; }
-      .hl { grid-template-columns: 1fr 1fr !important; gap: 10px; align-items: start; }
+      /* page 1 ends with the top strengths and weaknesses (left) beside the purchase simulation (right) */
+      .screensim, .hl-col li.pextra { display: none !important; }
+      .p1 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+      .p1sim .grp { margin: 0; }
+      .hl { grid-template-columns: 1fr !important; gap: 8px; align-items: start; }
+      .hl-col li.pmore { display: block; font-size: 7.5pt; color: var(--muted); font-style: italic; margin-top: 2px; }
       .hl-col { padding: 7px 10px; }
       .hl-col h4 { font-size: 8pt; margin-bottom: 4px; break-after: avoid; }
       .hl-col ul { gap: 1px; } .hl-col li { font-size: 8.5pt; break-inside: avoid; }
