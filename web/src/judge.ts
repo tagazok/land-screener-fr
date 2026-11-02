@@ -34,7 +34,8 @@ const RULES: Record<string, Rule> = {
   water_limit_breach_share: { dir: -1, good: 0, bad: 0.02 },
   pesticide_breach_share: { dir: -1, good: 0, bad: 0.05 },
   pfas_max: { dir: -1, good: 0.02, bad: 0.1 },
-  pfas_breach_share: { dir: -1, good: 0, bad: 0 },
+  // Any sample over the limit is bad news; 0 % is good (bad must be > 0, or 0 % would read as bad).
+  pfas_breach_share: { dir: -1, good: 0, bad: 0.0001 },
   sis_count: { dir: -1, good: 0, bad: 1 },
   polluted_site_count: { dir: -1, good: 0, bad: 2 },
   casias_per_km2: { dir: -1, good: 0.2, bad: 3 },

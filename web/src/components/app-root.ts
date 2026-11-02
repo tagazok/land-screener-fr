@@ -328,6 +328,15 @@ export class AppRoot extends LitElement {
       </details>`;
   }
 
+  /** Print the open commune's sheet (or save it as PDF): every section unfolded, the rest of the page hidden. */
+  private printSheet() {
+    const closed = [...this.renderRoot.querySelectorAll<HTMLDetailsElement>('.sidenav details:not([open])')];
+    closed.forEach((d) => (d.open = true));
+    const restore = () => { closed.forEach((d) => (d.open = false)); window.removeEventListener('afterprint', restore); };
+    window.addEventListener('afterprint', restore);
+    this.updateComplete.then(() => window.print());
+  }
+
   private favButton(code: string, label = false) {
     const on = this.favorites.includes(code);
     return html`<button class="favbtn ${on ? 'on' : ''} ${label ? 'labelled' : ''}" aria-pressed=${on ? 'true' : 'false'}
@@ -1101,12 +1110,14 @@ export class AppRoot extends LitElement {
                 ${this.favButton(row.code, true)}
                 <button class="btn small" title="Comparer cette commune avec d’autres, côte à côte"
                   @click=${() => this.openCompare([row.code, ...(this.compare ?? [])], true)}>⇆ Comparer…</button>
+                <button class="btn small" title="Imprimer cette fiche, ou l’enregistrer en PDF" @click=${() => this.printSheet()}>Imprimer</button>
               </div>
             </div>
           </div>
           <button class="close" aria-label="Fermer le panneau" title="Fermer (Échap)" @click=${() => this.select(null)}>×</button>
         </div>
         <div class="sn-body">
+          <p class="printonly">Land Screener FR · stratégie « ${STRATEGIES.find((s) => s.id === this.strategy)?.label} » · fiche du ${new Date().toLocaleDateString('fr-FR')} · données du ${this.meta ? new Date(this.meta.built).toLocaleDateString('fr-FR') : ''} · ${location.href}</p>
           ${r.pass
             ? html`<div class="sn-score">
                 <div><span class="label">Score ${tip('Score', HELP.score)}</span><b>${fmt('score', r.score)}</b><small>/100</small></div>
@@ -1720,6 +1731,21 @@ export class AppRoot extends LitElement {
     .code { margin: 0; font-size: 12px; color: var(--faint); }
     .close { border: 0; background: var(--surface-3); width: 32px; height: 32px; border-radius: 10px; font-size: 20px; line-height: 1; cursor: pointer; color: var(--ink-2); flex: none; }
     .close:hover { background: var(--track); } .close:focus-visible { outline: 2px solid var(--brand-2); }
+
+    /* ---- print: the commune sheet, or the comparison page, alone on paper ---- */
+    .printonly { display: none; }
+    @media print {
+      :host { --shadow: none; }
+      header, ai-chat, .loading, .backdrop, .drawer, .close, .sn-acts { display: none !important; }
+      .layout { display: block !important; }
+      .layout.has-detail > main { display: none !important; }
+      .sidenav { position: static !important; height: auto !important; width: auto !important; border: 0 !important; box-shadow: none !important; }
+      .sn-body { overflow: visible !important; padding: 0 !important; }
+      .sn-head { padding: 0 0 10px !important; }
+      .grp, .hl, .sim, .ai, .note { break-inside: avoid; }
+      address-risk input { display: none; }
+      .printonly { display: block; font-size: 11px; color: #555; margin: 0 0 8px; }
+    }
 
     /* ---- settings drawer ---- */
     .backdrop { position: fixed; inset: 0; background: rgba(10, 25, 18, .35); z-index: 40; animation: fade .15s ease-out; }
