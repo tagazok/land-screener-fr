@@ -18,6 +18,10 @@ import { TIER_COLORS, type Bounds, type MapView, type Paint } from './map-view';
 import './map-view';
 import './info-tip';
 import './ai-chat';
+import './compare-view';
+import type { CompareView } from './compare-view';
+import { MAX_COMPARE } from '../compare';
+import { loadFavorites, toggleFavorite } from '../favorites';
 import type { ChatHost } from './ai-chat';
 import { planFilters, type Plan } from '../ai/plan';
 
@@ -128,8 +132,14 @@ export class AppRoot extends LitElement {
   @state() private summaryDeps: Record<string, 'loading' | 'done'> = {};
   /** Megabytes of commune data received so far; null once the data is loaded. */
   @state() private loadingMb: number | null = 0;
+  /** Size of the commune data in megabytes, when the server tells it; null = unknown. */
+  @state() private loadingTotalMb: number | null = null;
   @state() private error: string | null = null;
   @state() private copied = false;
+  /** Favourite communes (this browser only). */
+  @state() private favorites: string[] = loadFavorites();
+  /** Communes on the comparison page; undefined = the page is closed. */
+  @state() private compare: string[] | undefined = undefined;
   @query('map-view') private mapView!: MapView;
 
   connectedCallback() {
@@ -145,6 +155,7 @@ export class AppRoot extends LitElement {
       if (e.key !== 'Escape') return;
       // Close the innermost layer first: drawer, then side panel, then expanded map.
       if (this.settingsOpen) this.settingsOpen = false;
+      else if (this.compare) return;
       else if (this.selected) this.select(null);
       else if (this.mapFull) this.setMapFull(false);
     });
@@ -152,7 +163,7 @@ export class AppRoot extends LitElement {
     // Close open dropdowns (départements, colonnes) on a click outside them.
     window.addEventListener('click', (e) => {
       const path = e.composedPath();
-      this.renderRoot.querySelectorAll('details.deppicker[open], details.colpicker[open]').forEach((d) => {
+      this.renderRoot.querySelectorAll('details.deppicker[open], details.colpicker[open], details.favmenu[open]').forEach((d) => {
         if (!path.includes(d)) (d as HTMLDetailsElement).open = false;
       });
     });
@@ -189,6 +200,10 @@ export class AppRoot extends LitElement {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`${url} : HTTP ${r.status}`);
     if (!r.body) return r.json();
+    // The reader counts decompressed bytes: Content-Length is only the total when the file is not compressed
+    // (GitHub Pages compresses it, so the total is then unknown and the bar shows activity instead).
+    const len = Number(r.headers.get('content-length'));
+    this.loadingTotalMb = !r.headers.get('content-encoding') && len > 0 ? len / 1e6 : null;
     const reader = r.body.getReader();
     const chunks: Uint8Array[] = [];
     let got = 0;
@@ -240,13 +255,70 @@ export class AppRoot extends LitElement {
     this.custom = s.custom ?? [];
     this.tiers = s.tiers ?? [];
     this.columns = defaultColumns(s.strategy);
+    this.compare = s.compare;
   }
 
   private pushUrl() {
     const h = encode({
       strategy: this.strategy, type: this.type, filters: this.filters, signals: this.signals, selected: this.selected, scopes: this.scopes, finance: encodeFinance(this.finance), custom: this.custom, tiers: this.tiers, rents: encodeRents(this.finance.parkingRents),
+      compare: this.compare,
     });
     history.replaceState(null, '', `#${h}`);
+  }
+
+  // ------------------------------------------------------------ favourites and comparison
+  private toggleFavorite(code: string) {
+    this.favorites = toggleFavorite(this.favorites, code);
+  }
+
+  /** Open the comparison page with these communes; `focus` puts the cursor in its search field. */
+  private openCompare(codes: string[], focus = false) {
+    this.compare = [...new Set(codes)].slice(0, MAX_COMPARE);
+    this.renderRoot.querySelectorAll('details.favmenu[open]').forEach((d) => ((d as HTMLDetailsElement).open = false));
+    this.pushUrl();
+    window.scrollTo(0, 0);
+    if (focus) this.updateComplete.then(() => (this.renderRoot.querySelector('compare-view') as CompareView | null)?.focusSearch());
+  }
+
+  private closeCompare() {
+    this.compare = undefined;
+    this.pushUrl();
+  }
+
+  /** Header menu: the favourite communes, a click opens one, and a button compares them. */
+  private renderFavMenu() {
+    const byCode = new Map(this.raw.map((r) => [r.code, r]));
+    const scored = new Map(this.results.map((r) => [r.row.code, r]));
+    const favs = this.favorites.map((c) => byCode.get(c)).filter((r): r is Row => !!r);
+    return html`
+      <details class="favmenu">
+        <summary class="hbtn" aria-label="Mes favoris">★ Favoris${favs.length ? html` <span class="n">${favs.length}</span>` : nothing}</summary>
+        <div class="favdrop" role="menu">
+          <div class="favhead"><b>Mes favoris</b>${tip('Favoris', 'Les communes marquées d’une étoile ☆, dans le tableau ou dans leur fiche. Elles sont enregistrées dans ce navigateur seulement : elles n’apparaissent pas sur un autre ordinateur ni dans le lien de partage.')}</div>
+          ${favs.length ? favs.map((r) => {
+            const s = scored.get(r.code);
+            const t = s?.pass && s.tier ? s.tier : 'fail';
+            return html`<div class="favitem">
+              <span class="tier" style="background:${TIER_COLORS[t]};color:${TIER_TEXT[t]}">${s?.pass ? s.tier : '–'}</span>
+              <button class="link" role="menuitem" @click=${() => { this.closeCompare(); this.renderRoot.querySelector('details.favmenu')?.removeAttribute('open'); if (!this.results.some((x) => x.row.code === r.code)) this.setScopes([]); this.select(r.code, true); }}>${r.nom}</button>
+              <small>${typeof r.postcodes === 'string' ? r.postcodes.split(' ')[0] : r.dep}</small>
+              <button class="x" aria-label="Retirer ${r.nom} des favoris" title="Retirer des favoris" @click=${() => this.toggleFavorite(r.code)}>×</button>
+            </div>`;
+          }) : html`<p class="favempty">Aucun favori pour l’instant. Cliquez sur l’étoile ☆ d’une commune, dans le tableau ou dans sa fiche.</p>`}
+          <div class="favfoot">
+            <button class="btn primary" ?disabled=${favs.length < 2} @click=${() => this.openCompare(favs.map((r) => r.code))}>
+              Comparer ${favs.length > MAX_COMPARE ? `les ${MAX_COMPARE} premiers` : 'les favoris'}</button>
+            <button class="link" @click=${() => this.openCompare([], true)}>Comparer d’autres communes</button>
+          </div>
+        </div>
+      </details>`;
+  }
+
+  private favButton(code: string, label = false) {
+    const on = this.favorites.includes(code);
+    return html`<button class="favbtn ${on ? 'on' : ''} ${label ? 'labelled' : ''}" aria-pressed=${on ? 'true' : 'false'}
+      title=${on ? 'Retirer des favoris' : 'Ajouter aux favoris'} aria-label=${on ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+      @click=${(e: Event) => { e.stopPropagation(); this.toggleFavorite(code); }}><span class="s">${on ? '★' : '☆'}</span>${label ? html`<span>${on ? 'Dans mes favoris' : 'Ajouter aux favoris'}</span>` : nothing}</button>`;
   }
 
   private setStrategy(id: StrategyId) {
@@ -357,6 +429,7 @@ export class AppRoot extends LitElement {
     applyPlan: (plan: Plan) => this.applyPlan(plan),
     facts: (context: string) => this.chatFacts(context),
     openCommune: (code: string) => {
+      if (this.compare) this.closeCompare();
       // A commune outside the chosen départements has no panel: widen to all of France first.
       if (!this.results.some((r) => r.row.code === code)) this.setScopes([]);
       this.select(code, true);
@@ -612,6 +685,7 @@ export class AppRoot extends LitElement {
               title=${s.label} @click=${() => this.setStrategy(s.id)}>${s.label.replace(/ \(.*\)$/, "")}</button>`)}
         </nav>
         <span class="grow"></span>
+        ${this.renderFavMenu()}
         <div class="themes" role="radiogroup" aria-label="Thème">
           ${([['auto', 'Auto', 'Suivre le réglage du système'], ['light', '☀', 'Thème clair'], ['dark', '☾', 'Thème sombre']] as const).map(([t, l, title]) => html`
             <button role="radio" aria-checked=${this.theme === t} class=${this.theme === t ? 'on' : ''} title=${title} aria-label=${title}
@@ -619,6 +693,17 @@ export class AppRoot extends LitElement {
         </div>
       </header>
 
+      ${this.compare ? html`
+        <div class="layout ${this.chatWidth ? 'chat-docked' : ''}">
+          <compare-view .rows=${this.rows} .results=${results} .codes=${this.compare} .favorites=${this.favorites}
+            .signals=${this.signals} .depNames=${this.depNames} .strategyLabel=${st.label} .copied=${this.copied}
+            .priority=${[...[...this.signals].filter((s) => s.weight > 0).sort((a, b) => b.weight - a.weight).map((s) => s.column), ...st.table]}
+            @compare-change=${(e: CustomEvent<string[]>) => this.openCompare(e.detail)}
+            @compare-close=${() => this.closeCompare()}
+            @toggle-favorite=${(e: CustomEvent<string>) => this.toggleFavorite(e.detail)}
+            @copy-link=${() => this.share()}
+            @open-commune=${(e: CustomEvent<string>) => { this.closeCompare(); if (!results.some((x) => x.row.code === e.detail)) this.setScopes([]); this.select(e.detail, true); }}></compare-view>
+        </div>` : html`
       <div class="layout ${sel ? 'has-detail' : ''} ${this.chatWidth ? 'chat-docked' : ''}">
         <main>
           <section class="summary" aria-label="Réglages actifs">
@@ -667,7 +752,7 @@ export class AppRoot extends LitElement {
           ${this.renderFooter()}
         </main>
         ${sel ? this.renderDetail(sel) : nothing}
-      </div>
+      </div>`}
 
       ${this.settingsOpen ? this.renderSettings(results, st.label) : nothing}
       ${this.raw.length ? html`<ai-chat .host=${this.chatHost} @chat-dock=${(e: CustomEvent<{ width: number }>) => this.setChatWidth(e.detail.width)}></ai-chat>` : nothing}
@@ -676,9 +761,12 @@ export class AppRoot extends LitElement {
           <span class="spinner" aria-hidden="true"></span>
           <div>
             <b>Chargement des données des communes…</b>
-            <small>${this.loadingMb > 0.05 ? `${this.loadingMb.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} Mo sur environ 30 Mo reçus` : 'Connexion…'}
-              · quelques secondes sur une bonne connexion</small>
-            <progress max="30" value=${Math.min(30, this.loadingMb)}></progress>
+            <small>${this.loadingMb > 0.05
+              ? `${this.loadingMb.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} Mo${this.loadingTotalMb ? ` sur ${this.loadingTotalMb.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} Mo` : ''} reçus`
+              : 'Connexion…'} · quelques secondes sur une bonne connexion</small>
+            ${this.loadingTotalMb
+              ? html`<progress max=${this.loadingTotalMb} value=${Math.min(this.loadingTotalMb, this.loadingMb)}></progress>`
+              : html`<progress></progress>`}
           </div>
         </div>` : nothing}
     `;
@@ -923,7 +1011,7 @@ export class AppRoot extends LitElement {
               <tr class=${`${r.pass ? '' : 'failrow'} ${r.row.code === this.selected ? 'sel' : ''}`}
                 @click=${() => this.select(r.row.code, true)}>
                 <td class="num">${r.pass ? rank.get(r.row.code) : ''}</td>
-                <td class="name">${this.tierBadge(r)}<span>${r.row.nom}${this.scopes.length !== 1 ? html` <small class="dep">${r.row.dep}</small>` : nothing}</span></td>
+                <td class="name">${this.tierBadge(r)}<span>${r.row.nom}${this.scopes.length !== 1 ? html` <small class="dep">${r.row.dep}</small>` : nothing}</span>${this.favButton(r.row.code)}</td>
                 <td>${r.pass
                   ? html`<span class="score"><span class="bar"><i style="width:${r.score}%"></i></span><b>${fmt('score', r.score)}</b></span>`
                   : html`<span class="out" title=${`Ne passe pas : ${r.failed.map((f) => FILTERS[f]?.label ?? f).join(', ')}`}>éliminée</span>`}</td>
@@ -986,6 +1074,11 @@ export class AppRoot extends LitElement {
               ${row.postcodes ? html`<small class="cp" title="Codes postaux">${String(row.postcodes).split(' ').length > 4
                 ? `${String(row.postcodes).split(' ').slice(0, 3).join(', ')}… (${String(row.postcodes).split(' ').length} codes postaux)`
                 : String(row.postcodes).split(' ').join(', ')}</small>` : nothing}
+              <div class="sn-acts">
+                ${this.favButton(row.code, true)}
+                <button class="btn small" title="Comparer cette commune avec d’autres, côte à côte"
+                  @click=${() => this.openCompare([row.code, ...(this.compare ?? [])], true)}>⇆ Comparer…</button>
+              </div>
             </div>
           </div>
           <button class="close" aria-label="Fermer le panneau" title="Fermer (Échap)" @click=${() => this.select(null)}>×</button>
@@ -1465,6 +1558,35 @@ export class AppRoot extends LitElement {
     .ai-badge { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--brand-2); }
     .ai p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.55; }
     .ai p.muted { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+
+    /* ---- favourites ---- */
+    .favmenu { position: relative; }
+    .favmenu summary { list-style: none; } .favmenu summary::-webkit-details-marker { display: none; }
+    .hbtn { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22);
+      color: #fff; border-radius: 10px; padding: 6px 11px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+    .hbtn:hover { background: rgba(255,255,255,.2); }
+    .hbtn .n { background: #fff; color: var(--brand); border-radius: 999px; padding: 0 7px; font-size: 11.5px; font-weight: 700; }
+    .favdrop { position: absolute; right: 0; top: calc(100% + 6px); width: 310px; background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+      border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.18); z-index: 40; overflow: hidden; }
+    .favhead { display: flex; align-items: center; padding: 10px 12px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+    .favitem { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--row-line); font-size: 13.5px; }
+    .favitem .link { font-weight: 600; color: var(--ink); text-align: left; }
+    .favitem small { color: var(--faint); }
+    .favitem .x { margin-left: auto; border: 0; background: none; color: var(--faint); font-size: 17px; cursor: pointer; padding: 0 2px; }
+    .favitem .x:hover { color: var(--bad); }
+    .favitem .tier { width: 20px; height: 20px; font-size: 11px; }
+    .favempty { margin: 0; padding: 10px 12px 12px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--row-line); }
+    .favfoot { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
+    .favfoot .btn { justify-content: center; } .favfoot .btn:disabled { opacity: .5; cursor: default; }
+    .favfoot .link { font-size: 13px; }
+    .favbtn { border: 0; background: none; cursor: pointer; color: var(--faint); font-size: 16px; line-height: 1; padding: 0 2px; margin-left: auto; opacity: .55; }
+    .favbtn.on { color: #e0a100; opacity: 1; }
+    tr:hover .favbtn, .favbtn:focus-visible { opacity: 1; }
+    .favbtn.labelled { display: inline-flex; align-items: center; gap: 6px; margin: 0; opacity: 1; border: 1px solid var(--line); background: var(--surface);
+      border-radius: 9px; padding: 5px 10px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+    .favbtn.labelled .s { font-size: 15px; color: var(--faint); } .favbtn.labelled.on .s { color: #e0a100; }
+    .sn-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .btn.small { padding: 5px 10px; font-size: 13px; }
 
     /* ---- loading ---- */
     .loading { position: fixed; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 60; display: flex; gap: 14px; align-items: center;

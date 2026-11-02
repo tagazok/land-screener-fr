@@ -3,6 +3,7 @@
 
 import type { FilterDef, SignalDef, Tier } from './engine';
 import { COLUMNS, preset, type PropertyType, type StrategyId, type Strategy } from './strategies';
+import { parseCodes } from './compare';
 
 export interface UrlState {
   strategy: StrategyId;
@@ -20,6 +21,8 @@ export interface UrlState {
   tiers?: Tier[];
   /** Per-commune parking rents, encoded by finance.ts (encodeRents). */
   rents?: string;
+  /** Communes on the comparison page; undefined = the page is closed, [] = open and empty. */
+  compare?: string[];
 }
 
 const OPS = ['min', 'max', 'isTrue', 'isFalse'] as const;
@@ -71,6 +74,7 @@ export function encode(st: UrlState): string {
   if (st.custom?.length) p.set('x', encodeCustom(st.custom));
   if (st.tiers?.length) p.set('g', st.tiers.join(''));
   if (st.rents) p.set('pr', st.rents);
+  if (st.compare) p.set('cmp', st.compare.join(','));
   return p.toString().replace(/%2C/g, ',').replace(/%3A/g, ':').replace(/%7E/g, '~');
 }
 
@@ -88,6 +92,7 @@ export function decode(hash: string): UrlState {
     finance: p.get('fi') ?? undefined,
     custom: decodeCustom(p.get('x'), (c) => c in COLUMNS),
     rents: p.get('pr') ?? undefined,
+    compare: p.has('cmp') ? parseCodes(p.get('cmp')) : undefined,
     tiers: [...new Set((p.get('g') ?? '').toUpperCase().split('').filter((t) => 'ABCDE'.includes(t)))].sort() as Tier[],
   };
   if (p.get('v') !== '1') return state;
