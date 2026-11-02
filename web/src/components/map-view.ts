@@ -65,7 +65,8 @@ export class MapView extends LitElement {
       #map.dark .maplibregl-ctrl-group button + button { border-top-color: #25342d; }
       #map.dark .maplibregl-ctrl-group button span { filter: invert(1); }
       .salepop .maplibregl-popup-content { font: 13px/1.45 system-ui, sans-serif; color: #14201b; padding: 10px 26px 10px 12px; border-radius: 10px; }
-      .salepop .maplibregl-popup-content { max-height: 360px; overflow-y: auto; }
+      /* Scroll inside a wrapper: a scrolling .maplibregl-popup-content leaves a white ghost block in Chrome. */
+      .salepop .scroll { max-height: var(--salepop-max, 360px); overflow-y: auto; }
       .salepop .big { font-size: 16px; font-weight: 700; }
       .salepop .sub, .salepop .src { color: #5d6b64; font-size: 12px; }
       .salepop .addr { font-weight: 600; }
@@ -138,8 +139,12 @@ export class MapView extends LitElement {
       const all = this.map!.queryRenderedFeatures(box, { layers: ['sales'] });
       const at = (f.geometry as GeoJSON.Point).coordinates as [number, number];
       this.popup?.remove();
+      // Cap the popup at about half the map so MapLibre can always place it fully
+      // above or below the point instead of sticking out of the map.
+      const h = this.map!.getContainer().clientHeight;
+      this.map!.getContainer().style.setProperty('--salepop-max', `${Math.max(140, Math.min(360, h / 2 - 40))}px`);
       this.popup = new maplibregl.Popup({ closeButton: true, maxWidth: '300px', className: 'salepop' })
-        .setLngLat(at).setHTML(salesHtml(all.map((x) => x.properties ?? {}), at)).addTo(this.map!);
+        .setLngLat(at).setHTML(`<div class="scroll">${salesHtml(all.map((x) => x.properties ?? {}), at)}</div>`).addTo(this.map!);
     });
     this.map.on('mouseenter', 'sales', () => (this.map!.getCanvas().style.cursor = 'pointer'));
     this.map.on('mouseleave', 'sales', () => (this.map!.getCanvas().style.cursor = ''));
