@@ -42,6 +42,8 @@ export class AddressRisk extends LitElement {
     if (changed.has('code') && changed.get('code') !== undefined) {
       this.query = ''; this.hits = []; this.report = null; this.status = 'idle';
     }
+    // Lets the printed sheet keep this section only when an address was looked up.
+    this.toggleAttribute('reported', !!this.report);
   }
 
   private onInput(v: string) {
@@ -122,6 +124,7 @@ export class AddressRisk extends LitElement {
 
   static styles = css`
     :host { display: block; font-size: 13px; }
+    @media print { :host { font-size: 8.5pt; } .box { display: none; } .addr { margin-top: 2px; } }
     .box { position: relative; }
     input { width: 100%; box-sizing: border-box; border: 1px solid var(--input-line); background: var(--input-bg); color: var(--ink); border-radius: 9px; padding: 7px 10px; font: inherit; }
     input:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand-2); }

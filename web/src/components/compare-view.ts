@@ -147,7 +147,10 @@ export class CompareView extends LitElement {
         <button class="btn" ?disabled=${!cities.length} title="Imprimer la comparaison, ou l’enregistrer en PDF" @click=${() => window.print()}>Imprimer</button>
       </div>
 
-      <p class="printonly">Land Screener FR · comparaison du ${new Date().toLocaleDateString('fr-FR')} · ${location.href}</p>
+      <div class="printonly pbar"><b>Land Screener FR</b>
+        <span>Comparaison · stratégie « ${this.strategyLabel} » · ${new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</span></div>
+      <h2 class="printonly ptitle">${cities.map((c) => c.nom).join(' · ')}</h2>
+      <p class="printonly psub">La meilleure valeur de chaque ligne est en vert (★), selon la stratégie choisie.${this.onlyDiff ? ' Lignes aux valeurs proches masquées.' : ''}</p>
       <div class="scroller card">
         <table style="--n:${cities.length + (canAdd ? 1 : 0)}">
           <thead>
@@ -165,6 +168,7 @@ export class CompareView extends LitElement {
                     <button class="x" aria-label="Retirer ${c.nom} de la comparaison" title="Retirer"
                       @click=${() => this.setCodes(this.codes.filter((x) => x !== c.code))}>×</button>
                   </div>
+                  <b class="printonly pname">${c.nom}</b>
                   <div class="sub">
                     <span class="tier" style="background:${TIER_COLORS[t]};color:${TIER_TEXT[t]}"
                       title=${s ? (s.pass ? `Groupe ${s.tier}` : 'Éliminée par les filtres') : 'Hors des départements affichés'}>${s?.pass ? s.tier : '–'}</span>
@@ -175,6 +179,8 @@ export class CompareView extends LitElement {
               })}
               ${canAdd ? html`<th class="add">${this.renderAdd(cities.length)}</th>` : nothing}
             </tr>
+          </thead>
+          <tbody>
             <tr class="cards">
               <th class="corner2"></th>
               ${cities.map((c, i) => html`<th class="detail">
@@ -182,22 +188,24 @@ export class CompareView extends LitElement {
                 <div class="wins">Meilleure sur ${wins[i].length} / ${judged.length}${tip('Meilleure sur…', 'Nombre de lignes où cette commune a la meilleure valeur, parmi les lignes qui ont un meilleur (égalités comprises). Avec « Différences seulement », seules les lignes affichées comptent.')}</div>
                 <ul>${wins[i].filter((c) => !DETAIL_ONLY.test(c)).slice(0, 3).map((col) => html`<li>${COLUMNS[col].label}</li>`)}</ul>
               </th>`)}
-              ${canAdd ? html`<th></th>` : nothing}
+              ${canAdd ? html`<th class="addcol"></th>` : nothing}
             </tr>
-          </thead>
+          </tbody>
           <tbody>
             ${cities.length ? groups.map((g) => html`
-              <tr class="sec"><td colspan=${span}><span>${g.title}${g.help ? tip(g.title, g.help) : nothing}</span></td></tr>
+              <tr class="sec"><td colspan=${cities.length + 1}><span>${g.title}${g.help ? tip(g.title, g.help) : nothing}</span></td>${canAdd ? html`<td class="addcol"></td>` : nothing}</tr>
               ${g.lines.map((l) => html`<tr>
                 <td class="label">${COLUMNS[l.column].label}${columnHelp(l.column) ? tip(COLUMNS[l.column].label, columnHelp(l.column)) : nothing}</td>
                 ${l.values.map((v, i) => html`<td class=${l.best.includes(i) ? 'best' : ''}>${fmt(l.column, v)}${l.best.includes(i) ? html`<span class="mark" aria-label="meilleure"> ★</span>` : nothing}</td>`)}
-                ${canAdd ? html`<td></td>` : nothing}
+                ${canAdd ? html`<td class="addcol"></td>` : nothing}
               </tr>`)}`)
             : html`<tr><td class="label"></td><td class="empty" colspan=${span - 1}>Ajoutez une commune avec le champ à droite : vos favoris sont proposés en premier.</td></tr>`}
           </tbody>
         </table>
       </div>
-      <p class="muted small">Valeurs de la fiche de chaque commune, pour le type de bien de la stratégie. Les mêmes avertissements s’appliquent : survolez les « ? » pour le détail des calculs.</p>
+      <p class="muted small screenonly">Valeurs de la fiche de chaque commune, pour le type de bien de la stratégie. Les mêmes avertissements s’appliquent : survolez les « ? » pour le détail des calculs.</p>
+      <p class="printonly pfoot">Valeurs de la fiche de chaque commune, pour le type de bien de la stratégie, à partir de données publiques (INSEE, DVF, ANIL, Géorisques, SNCF, ATMO…). Ce n’est pas un conseil en investissement.
+        <br>Comparaison en ligne : ${location.origin + location.pathname + location.hash}</p>
     `;
   }
 
@@ -287,14 +295,29 @@ export class CompareView extends LitElement {
     .hint { margin-top: 6px; }
     .printonly { display: none; }
     @media print {
-      :host { padding: 0; }
-      .bar, .btn, .switchlabel, info-tip, .x, .star, th.add, td:last-child:empty { display: none !important; }
-      .scroller { max-height: none; overflow: visible; box-shadow: none; }
-      table { min-width: 0; font-size: 11px; }
-      th, td { padding: 4px 6px; }
-      tr.names th, th.corner, td.label { position: static; }
-      tr { break-inside: avoid; }
-      .printonly { display: block; font-size: 11px; color: #555; margin: 0; }
+      :host { padding: 0; gap: 0; font-size: 9pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .bar, .title, .screenonly, .btn, .switchlabel, info-tip, .x, .star, th.add, .addcol { display: none !important; }
+      .printonly { display: block; }
+      .pbar { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-bottom: 2px solid var(--brand); padding-bottom: 4px; margin-bottom: 10px; font-size: 8pt; color: var(--muted); }
+      .pbar b { color: var(--brand); font-size: 10pt; letter-spacing: .02em; }
+      .ptitle { margin: 0; font-size: 18pt; letter-spacing: -.02em; }
+      .psub { margin: 2px 0 10px; font-size: 8pt; color: var(--muted); }
+      .scroller { max-height: none; overflow: visible; box-shadow: none; border: 0; border-radius: 0; }
+      table { min-width: 0; font-size: 8.5pt; }
+      th, td { padding: 3px 7px; }
+      th.corner, th.corner2, td.label { position: static; width: 30%; border-right: 0; }
+      tr.names th { position: static; box-shadow: none; border-bottom: 0; padding-top: 6px; }
+      /* A plain name: a button's text is dropped from the header Chrome repeats on each page. */
+      .head { display: none; }
+      .pname { font-size: 11.5pt; font-weight: 700; color: var(--ink); }
+      .sub { flex-wrap: wrap; font-size: 8.5pt; } .sub b { font-size: 11pt; }
+      .sub small { margin-left: 0; width: 100%; white-space: normal; font-size: 7.5pt; }
+      tr.cards th { border-bottom: 2px solid var(--brand); padding-bottom: 6px; }
+      .wins, .detail ul { font-size: 8pt; } .detail small { font-size: 7.5pt; }
+      tr.sec td { background: none; border-bottom: 1.5px solid var(--brand); padding: 11px 7px 3px; }
+      tr.sec td span { position: static; color: var(--brand); font-size: 8pt; }
+      tr { break-inside: avoid; } tr.sec { break-after: avoid; }
+      .pfoot { margin: 10px 0 0; padding-top: 6px; border-top: 1px solid var(--line); font-size: 7.5pt; color: var(--muted); break-inside: avoid; }
     }
   `;
 }
