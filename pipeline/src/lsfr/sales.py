@@ -7,8 +7,10 @@ standalone outbuilding (garage, parking, cellar). Mutations mixing several dwell
 or commercial premises are left out: their price cannot be split.
 
 Point properties (short names keep the tiles small):
-  p price €, t type (M house, A flat, T land, D outbuilding), s living m², l land m²,
-  r rooms, d date YYYY-MM, n 1 = new (VEFA).
+  p price €, t type (M house, A flat, T land, D outbuilding), s living m², l land m², r rooms,
+  d date YYYY-MM-DD, n nature (F off-plan VEFA, J auction, B building-land sale; absent = ordinary sale),
+  a address, g outbuildings sold with the dwelling, k Carrez m² of the dwelling's lots, nl lots,
+  c land by kind "CODE:m²,..." (DVF nature de culture codes), q first cadastral parcel, np parcels.
 
     uv run lsfr sales
 """
@@ -26,40 +28,58 @@ from .sources import DEPTS, DVF_YEARS, dep_dir
 TYPES = {"Maison": "M", "Appartement": "A"}
 
 
+NATURES = {"Vente": None, "Vente en l'état futur d'achèvement": "F", "Adjudication": "J", "Vente terrain à bâtir": "B"}
+
+
 def mutations(paths: list[Path], end: str) -> pl.DataFrame:
+    carrez = [f"lot{i}_surface_carrez" for i in range(1, 6)]
     cols = ["id_mutation", "date_mutation", "nature_mutation", "valeur_fonciere", "type_local", "surface_reelle_bati",
             "nombre_pieces_principales", "surface_terrain", "code_nature_culture", "longitude", "latitude",
-            "numero_disposition", "lot1_numero", "id_parcelle"]
+            "numero_disposition", "lot1_numero", "id_parcelle", "adresse_numero", "adresse_suffixe", "adresse_nom_voie",
+            "code_postal", "nombre_lots", *carrez]
     df = pl.concat([pl.read_csv(p, columns=cols, infer_schema_length=0) for p in paths], how="vertical_relaxed")
     df = df.with_columns(
         pl.col("date_mutation").str.to_date(),
         *(pl.col(c).cast(pl.Float64, strict=False) for c in ("valeur_fonciere", "surface_reelle_bati", "surface_terrain",
-                                                            "nombre_pieces_principales", "longitude", "latitude")),
+                                                            "nombre_pieces_principales", "longitude", "latitude",
+                                                            "nombre_lots", *carrez)),
     )
     end_d = pl.lit(end).str.to_date()
-    df = df.filter(pl.col("nature_mutation").is_in(["Vente", "Vente en l'état futur d'achèvement"])
+    df = df.filter(pl.col("nature_mutation").is_in(list(NATURES))
                    & (pl.col("date_mutation") > end_d.dt.offset_by("-24mo")) & (pl.col("date_mutation") <= end_d))
     locals_ = df.filter(pl.col("type_local").is_not_null()).unique(
         subset=["id_mutation", "type_local", "surface_reelle_bati", "nombre_pieces_principales", "lot1_numero"])
-    loc = locals_.group_by("id_mutation").agg(
-        pl.col("type_local").is_in(list(TYPES)).sum().alias("n_dw"),
+    dw = pl.col("type_local").is_in(list(TYPES))
+    loc = locals_.with_columns(pl.sum_horizontal(carrez).alias("_carrez")).group_by("id_mutation").agg(
+        dw.sum().alias("n_dw"),
         (pl.col("type_local") == "Dépendance").sum().alias("n_dep"),
         (pl.col("type_local") == "Local industriel. commercial ou assimilé").sum().alias("n_com"),
-        pl.col("type_local").filter(pl.col("type_local").is_in(list(TYPES))).first().alias("tl"),
-        pl.col("surface_reelle_bati").filter(pl.col("type_local").is_in(list(TYPES))).first().alias("s"),
-        pl.col("nombre_pieces_principales").filter(pl.col("type_local").is_in(list(TYPES))).first().alias("r"),
+        pl.col("type_local").filter(dw).first().alias("tl"),
+        pl.col("surface_reelle_bati").filter(dw).first().alias("s"),
+        pl.col("nombre_pieces_principales").filter(dw).first().alias("r"),
+        pl.col("_carrez").filter(dw).first().alias("k"),
     )
-    # Land surface: one value per parcel (rows repeat a parcel for each local).
-    land = df.unique(subset=["id_mutation", "id_parcelle", "code_nature_culture"]).group_by("id_mutation").agg(
+    # Land: one value per parcel and kind of land (rows repeat a parcel for each local).
+    parcels = df.filter(pl.col("code_nature_culture").is_not_null()).unique(subset=["id_mutation", "id_parcelle", "code_nature_culture"])
+    land = parcels.group_by("id_mutation").agg(
         pl.col("surface_terrain").sum().alias("l"),
         (pl.col("code_nature_culture") == "AB").any().alias("ab"),
     )
+    kinds = (parcels.group_by("id_mutation", "code_nature_culture").agg(pl.col("surface_terrain").sum().alias("m2"))
+             .filter(pl.col("m2") > 0).sort("m2", descending=True)
+             .group_by("id_mutation").agg(pl.concat_str([pl.col("code_nature_culture"), pl.col("m2").round(0).cast(pl.Int64).cast(pl.Utf8)],
+                                                        separator=":").str.join(",").alias("c")))
+    addr = pl.concat_str([pl.col("adresse_numero"), pl.col("adresse_suffixe"), pl.col("adresse_nom_voie")], separator=" ", ignore_nulls=True)
     head = df.filter(pl.col("longitude").is_not_null()).group_by("id_mutation").agg(
         pl.col("date_mutation").first().alias("date"), pl.col("valeur_fonciere").first().alias("p"),
         pl.col("nature_mutation").first().alias("nat"), pl.col("longitude").first().alias("lon"),
-        pl.col("latitude").first().alias("lat"), pl.col("numero_disposition").n_unique().alias("n_disp"))
-    m = head.join(loc, on="id_mutation", how="left").join(land, on="id_mutation", how="left").with_columns(
-        *(pl.col(c).fill_null(0) for c in ("n_dw", "n_dep", "n_com")))
+        pl.col("latitude").first().alias("lat"), pl.col("numero_disposition").n_unique().alias("n_disp"),
+        addr.filter(pl.col("adresse_nom_voie").is_not_null()).first().alias("street"),
+        pl.col("code_postal").drop_nulls().first().alias("cp"),
+        pl.col("id_parcelle").drop_nulls().first().alias("q"), pl.col("id_parcelle").n_unique().alias("np"),
+        pl.col("nombre_lots").max().alias("nl"))
+    m = (head.join(loc, on="id_mutation", how="left").join(land, on="id_mutation", how="left")
+         .join(kinds, on="id_mutation", how="left").with_columns(*(pl.col(c).fill_null(0) for c in ("n_dw", "n_dep", "n_com"))))
     m = m.filter((pl.col("n_disp") == 1) & (pl.col("n_com") == 0) & (pl.col("p") >= 500))
     t = (pl.when(pl.col("n_dw") == 1).then(pl.col("tl").replace_strict(TYPES, default=None))
          .when((pl.col("n_dw") == 0) & (pl.col("n_dep") == 0) & pl.col("ab")).then(pl.lit("T"))
@@ -68,10 +88,19 @@ def mutations(paths: list[Path], end: str) -> pl.DataFrame:
     # Same plausibility guard as the medians for dwellings (€/m² of living area).
     pm2 = pl.col("p") / pl.col("s")
     m = m.filter(~pl.col("t").is_in(["M", "A"]) | ((pl.col("s") >= 9) & pm2.is_between(300, 20_000)))
+    dwelling = pl.col("t").is_in(["M", "A"])
     return m.select(
         "lon", "lat", pl.col("p").round(0).cast(pl.Int64), "t", pl.col("s").round(0).cast(pl.Int32),
-        pl.col("l").round(0).cast(pl.Int32), pl.when(pl.col("r") <= 30).then(pl.col("r")).cast(pl.Int16), pl.col("date").dt.strftime("%Y-%m").alias("d"),
-        (pl.col("nat") != "Vente").cast(pl.Int8).alias("n"))
+        pl.col("l").round(0).cast(pl.Int32), pl.when(pl.col("r") <= 30).then(pl.col("r")).cast(pl.Int16),
+        pl.col("date").dt.strftime("%Y-%m-%d").alias("d"),
+        pl.col("nat").replace_strict(NATURES, default=None).alias("n"),
+        pl.concat_str([pl.col("street"), pl.col("cp")], separator=", ", ignore_nulls=True).alias("a"),
+        pl.when(dwelling).then(pl.col("n_dep")).cast(pl.Int16).alias("g"),
+        pl.when(pl.col("k") > 0).then(pl.col("k").round(1)).alias("k"),
+        pl.when(pl.col("nl") > 0).then(pl.col("nl")).cast(pl.Int16).alias("nl"),
+        pl.when(pl.col("c").str.contains(",") | ~pl.col("c").str.starts_with("S:")).then(pl.col("c")).alias("c"),
+        "q", pl.when(pl.col("np") > 1).then(pl.col("np")).cast(pl.Int16).alias("np"),
+    )
 
 
 def write(raw: Path, out: Path, end: str) -> None:

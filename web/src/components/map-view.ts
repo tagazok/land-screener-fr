@@ -4,6 +4,9 @@ import maplibregl, { type Map as MlMap } from 'maplibre-gl';
 import mlcss from 'maplibre-gl/dist/maplibre-gl.css?inline';
 import { Protocol } from 'pmtiles';
 import type { Tier } from '../engine';
+import { SALE_COLORS, salesHtml } from '../sales';
+
+export { SALE_COLORS };
 
 export const TIER_COLORS: Record<Tier | 'fail', string> = {
   A: '#1a9850',
@@ -45,28 +48,6 @@ export const OVERLAYS = {
   },
 } as const;
 
-/** Sale point colours by type: house, flat, building land, outbuilding. */
-export const SALE_COLORS = { M: '#2563eb', A: '#a21caf', T: '#b45309', D: '#64748b' } as const;
-const SALE_LABEL: Record<string, string> = { M: 'Maison', A: 'Appartement', T: 'Terrain à bâtir', D: 'Dépendance (garage, parking, cave)' };
-const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
-const eur = (v: number) => v.toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' €';
-
-/** Popup of one sale (DVF): type, price, surfaces, €/m², month. Values are numbers or fixed codes from our own tiles. */
-function saleHtml(p: Record<string, unknown>): string {
-  const n = (k: string) => (typeof p[k] === 'number' ? (p[k] as number) : null);
-  const price = n('p'), s = n('s'), l = n('l'), r = n('r');
-  const t = String(p.t ?? '');
-  const [y, mo] = String(p.d ?? '').split('-');
-  const lines = [
-    `<b>${SALE_LABEL[t] ?? 'Vente'}${n('n') ? ' neuve (VEFA)' : ''}</b>`,
-    price !== null ? `<span class="big">${eur(price)}</span>` : '',
-    [s ? `${s} m² habitables` : '', r ? `${r} pièce${r > 1 ? 's' : ''}` : '', l ? `terrain ${l.toLocaleString('fr-FR')} m²` : ''].filter(Boolean).join(' · '),
-    price && s && (t === 'M' || t === 'A') ? `${eur(price / s)}/m²` : price && l && t === 'T' ? `${eur(price / l)}/m² de terrain` : '',
-    y ? `<small>Vendu en ${MONTHS[Number(mo) - 1] ?? ''} ${y} · DVF</small>` : '',
-  ];
-  return lines.filter(Boolean).join('<br>');
-}
-
 // pmtiles:// URLs are read with HTTP range requests: only visible tiles are fetched.
 const protocol = new Protocol();
 maplibregl.addProtocol('pmtiles', protocol.tile);
@@ -84,8 +65,14 @@ export class MapView extends LitElement {
       #map.dark .maplibregl-ctrl-group button + button { border-top-color: #25342d; }
       #map.dark .maplibregl-ctrl-group button span { filter: invert(1); }
       .salepop .maplibregl-popup-content { font: 13px/1.45 system-ui, sans-serif; color: #14201b; padding: 10px 26px 10px 12px; border-radius: 10px; }
+      .salepop .maplibregl-popup-content { max-height: 360px; overflow-y: auto; }
       .salepop .big { font-size: 16px; font-weight: 700; }
-      .salepop small { color: #5d6b64; }
+      .salepop .sub, .salepop .src { color: #5d6b64; font-size: 12px; }
+      .salepop .addr { font-weight: 600; }
+      .salepop .count { font-weight: 700; margin-bottom: 6px; color: #134e33; }
+      .salepop hr { border: 0; border-top: 1px solid #e3e7e2; margin: 8px 0; }
+      .salepop .src { margin-top: 6px; }
+      .salepop a { color: #1f7a4c; font-weight: 600; }
     `,
   ];
 
@@ -146,9 +133,13 @@ export class MapView extends LitElement {
     this.map.on('click', 'sales', (e) => {
       const f = e.features?.[0];
       if (!f) return;
+      // Every sale under the click (several lots of one building often share a point).
+      const box: [maplibregl.PointLike, maplibregl.PointLike] = [[e.point.x - 4, e.point.y - 4], [e.point.x + 4, e.point.y + 4]];
+      const all = this.map!.queryRenderedFeatures(box, { layers: ['sales'] });
+      const at = (f.geometry as GeoJSON.Point).coordinates as [number, number];
       this.popup?.remove();
-      this.popup = new maplibregl.Popup({ closeButton: true, maxWidth: '260px', className: 'salepop' })
-        .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number]).setHTML(saleHtml(f.properties ?? {})).addTo(this.map!);
+      this.popup = new maplibregl.Popup({ closeButton: true, maxWidth: '300px', className: 'salepop' })
+        .setLngLat(at).setHTML(salesHtml(all.map((x) => x.properties ?? {}), at)).addTo(this.map!);
     });
     this.map.on('mouseenter', 'sales', () => (this.map!.getCanvas().style.cursor = 'pointer'));
     this.map.on('mouseleave', 'sales', () => (this.map!.getCanvas().style.cursor = ''));
