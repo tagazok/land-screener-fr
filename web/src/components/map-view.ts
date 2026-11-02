@@ -45,6 +45,28 @@ export const OVERLAYS = {
   },
 } as const;
 
+/** Sale point colours by type: house, flat, building land, outbuilding. */
+export const SALE_COLORS = { M: '#2563eb', A: '#a21caf', T: '#b45309', D: '#64748b' } as const;
+const SALE_LABEL: Record<string, string> = { M: 'Maison', A: 'Appartement', T: 'Terrain à bâtir', D: 'Dépendance (garage, parking, cave)' };
+const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const eur = (v: number) => v.toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' €';
+
+/** Popup of one sale (DVF): type, price, surfaces, €/m², month. Values are numbers or fixed codes from our own tiles. */
+function saleHtml(p: Record<string, unknown>): string {
+  const n = (k: string) => (typeof p[k] === 'number' ? (p[k] as number) : null);
+  const price = n('p'), s = n('s'), l = n('l'), r = n('r');
+  const t = String(p.t ?? '');
+  const [y, mo] = String(p.d ?? '').split('-');
+  const lines = [
+    `<b>${SALE_LABEL[t] ?? 'Vente'}${n('n') ? ' neuve (VEFA)' : ''}</b>`,
+    price !== null ? `<span class="big">${eur(price)}</span>` : '',
+    [s ? `${s} m² habitables` : '', r ? `${r} pièce${r > 1 ? 's' : ''}` : '', l ? `terrain ${l.toLocaleString('fr-FR')} m²` : ''].filter(Boolean).join(' · '),
+    price && s && (t === 'M' || t === 'A') ? `${eur(price / s)}/m²` : price && l && t === 'T' ? `${eur(price / l)}/m² de terrain` : '',
+    y ? `<small>Vendu en ${MONTHS[Number(mo) - 1] ?? ''} ${y} · DVF</small>` : '',
+  ];
+  return lines.filter(Boolean).join('<br>');
+}
+
 // pmtiles:// URLs are read with HTTP range requests: only visible tiles are fetched.
 const protocol = new Protocol();
 maplibregl.addProtocol('pmtiles', protocol.tile);
@@ -61,6 +83,9 @@ export class MapView extends LitElement {
       #map.dark .maplibregl-ctrl-group { background: #16211c; box-shadow: 0 0 0 1px #25342d; }
       #map.dark .maplibregl-ctrl-group button + button { border-top-color: #25342d; }
       #map.dark .maplibregl-ctrl-group button span { filter: invert(1); }
+      .salepop .maplibregl-popup-content { font: 13px/1.45 system-ui, sans-serif; color: #14201b; padding: 10px 26px 10px 12px; border-radius: 10px; }
+      .salepop .big { font-size: 16px; font-weight: 700; }
+      .salepop small { color: #5d6b64; }
     `,
   ];
 
@@ -72,8 +97,13 @@ export class MapView extends LitElement {
   @property({ type: Boolean }) dark = false;
   /** When set, the map zooms to these bounds (e.g. the chosen département). */
   @property({ attribute: false }) zoomTo: Bounds | null = null;
-  /** Optional background layers drawn under the communes. */
-  @property({ attribute: false }) overlays: { forest: boolean; relief: boolean } = { forest: false, relief: false };
+  /** Optional layers: forest and relief under the communes, individual sales on top. */
+  @property({ attribute: false }) overlays: { forest: boolean; relief: boolean; sales?: boolean } = { forest: false, relief: false };
+  /** URL of the sales PMTiles file (points, from zoom 12). */
+  @property() salesTiles = '';
+  /** The sales layer needs this zoom: below it the map says so. */
+  static SALES_MINZOOM = 12;
+  private popup?: maplibregl.Popup;
 
   private map?: MlMap;
   private styleReady = false;
@@ -113,7 +143,19 @@ export class MapView extends LitElement {
       this.hovered = null;
       this.map!.getCanvas().style.cursor = '';
     });
+    this.map.on('click', 'sales', (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      this.popup?.remove();
+      this.popup = new maplibregl.Popup({ closeButton: true, maxWidth: '260px', className: 'salepop' })
+        .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number]).setHTML(saleHtml(f.properties ?? {})).addTo(this.map!);
+    });
+    this.map.on('mouseenter', 'sales', () => (this.map!.getCanvas().style.cursor = 'pointer'));
+    this.map.on('mouseleave', 'sales', () => (this.map!.getCanvas().style.cursor = ''));
+    this.map.on('zoomend', () => this.dispatchEvent(new CustomEvent('zoom', { detail: this.map!.getZoom(), bubbles: true, composed: true })));
     this.map.on('click', 'fill', (e) => {
+      // A click on a sale point opens its popup, not the commune panel.
+      if (this.map!.getLayer('sales') && this.overlays.sales && this.map!.queryRenderedFeatures(e.point, { layers: ['sales'] }).length) return;
       const code = e.features?.[0]?.properties?.code as string | undefined;
       if (code && !this.paint.get(code)?.hidden) this.dispatchEvent(new CustomEvent('select', { detail: code, bubbles: true, composed: true }));
     });
@@ -158,6 +200,19 @@ export class MapView extends LitElement {
         paint: { 'line-color': this.dark ? '#c9d6cf' : '#2c3e36', 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.6, 10, 1.6], 'line-opacity': 0.55 },
       });
     }
+    if (this.salesTiles) {
+      m.addSource('sales', { type: 'vector', url: `pmtiles://${new URL(this.salesTiles, location.href).href}`,
+        attribution: 'Ventes : DVF (DGFiP)' });
+      m.addLayer({
+        id: 'sales', type: 'circle', source: 'sales', 'source-layer': 'sales', minzoom: MapView.SALES_MINZOOM, layout: { visibility: 'none' },
+        paint: {
+          'circle-color': ['match', ['get', 't'], 'M', SALE_COLORS.M, 'A', SALE_COLORS.A, 'T', SALE_COLORS.T, SALE_COLORS.D],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 16, 7],
+          'circle-stroke-color': this.dark ? '#0f1714' : '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 1.5],
+          'circle-opacity': 0.9,
+        },
+      });
+    }
     m.addLayer({
       id: 'highlight', type: 'line', source: SRC, 'source-layer': LAYER,
       paint: {
@@ -183,6 +238,8 @@ export class MapView extends LitElement {
     for (const id of Object.keys(OVERLAYS) as (keyof typeof OVERLAYS)[]) {
       m.setLayoutProperty(id, 'visibility', this.overlays[id] ? 'visible' : 'none');
     }
+    if (m.getLayer('sales')) m.setLayoutProperty('sales', 'visibility', this.overlays.sales ? 'visible' : 'none');
+    if (!this.overlays.sales) this.popup?.remove();
     m.setPaintProperty('fill', 'fill-opacity', this.fillOpacity());
   }
 
@@ -200,8 +257,20 @@ export class MapView extends LitElement {
     if (this.selected) this.setState(this.selected, { selected: true });
   }
 
-  flyTo(lon: number, lat: number) {
-    this.map?.flyTo({ center: [lon, lat], zoom: Math.max(this.map.getZoom(), 10) });
+  private marker?: maplibregl.Marker;
+
+  /** Show a pin at [lon, lat] (an address the user looked up), or remove it with null. */
+  mark(at: [number, number] | null) {
+    this.marker?.remove();
+    this.marker = undefined;
+    if (at && this.map) this.marker = new maplibregl.Marker({ color: '#b42318' }).setLngLat(at).addTo(this.map);
+  }
+
+  /** Fly to a point (NaN = stay centred), at least at `zoom` (10 by default). */
+  flyTo(lon: number, lat: number, zoom = 10) {
+    if (!this.map) return;
+    const center = Number.isFinite(lon) && Number.isFinite(lat) ? ([lon, lat] as [number, number]) : this.map.getCenter();
+    this.map.flyTo({ center, zoom: Math.max(this.map.getZoom(), zoom) });
   }
 
   updated(changed: Map<string, unknown>) {

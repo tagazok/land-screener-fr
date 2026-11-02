@@ -1,5 +1,5 @@
 {
- "built": "2026-10-30",
+ "built": "2026-11-02",
  "scope": {
   "label": "France métropolitaine",
   "departements": 96,
@@ -276,6 +276,22 @@
    "licence": "Licence Ouverte 2.0",
    "vintage": "mise à jour du 26 mars 2026",
    "url": "https://transport.data.gouv.fr/datasets/base-nationale-consolidee-des-zones-a-faibles-emissions",
+   "credit": null
+  },
+  {
+   "key": "trains",
+   "producer": "SNCF Voyageurs – gares de voyageurs, fréquentation en gares, horaires des trains (GTFS)",
+   "licence": "Licence Ouverte 2.0 (gares, fréquentation) ; ODbL (horaires)",
+   "vintage": "horaires 2026, fréquentation 2024",
+   "url": "https://ressources.data.sncf.com/",
+   "credit": null
+  },
+  {
+   "key": "airports",
+   "producer": "OurAirports – aéroports avec vols réguliers",
+   "licence": "Domaine public",
+   "vintage": "extraction 2026-11",
+   "url": "https://ourairports.com/data/",
    "credit": null
   },
   {
@@ -584,6 +600,58 @@
    "unit": "text",
    "label": "Postal codes of the commune, space-separated (geo.api.gouv.fr)"
   },
+  "station_name": {
+   "unit": "text",
+   "label": "Nearest station with rail departures on a typical weekday (SNCF)"
+  },
+  "station_km": {
+   "unit": "km",
+   "label": "Straight-line distance from the commune centre to that station"
+  },
+  "station_trains_day": {
+   "unit": "count",
+   "label": "Trains leaving that station on the reference weekday (SNCF GTFS)"
+  },
+  "station_passengers": {
+   "unit": "count",
+   "label": "Passengers at that station in 2024 (SNCF)"
+  },
+  "bigcity_train_min": {
+   "unit": "min",
+   "label": "Fastest direct train to a city of 150,000+ residents, from a station within 20 km"
+  },
+  "bigcity_train_city": {
+   "unit": "text",
+   "label": "That big city"
+  },
+  "bigcity_train_station": {
+   "unit": "text",
+   "label": "Station that train leaves from"
+  },
+  "paris_train_min": {
+   "unit": "min",
+   "label": "Fastest direct train to Paris, from a station within 20 km"
+  },
+  "paris_train_station": {
+   "unit": "text",
+   "label": "Station that train leaves from"
+  },
+  "airport_km": {
+   "unit": "km",
+   "label": "Straight-line distance to the nearest airport with scheduled flights (OurAirports)"
+  },
+  "airport_name": {
+   "unit": "text",
+   "label": "That airport"
+  },
+  "big_airport_km": {
+   "unit": "km",
+   "label": "Straight-line distance to the nearest major airport (about 1M+ passengers a year)"
+  },
+  "big_airport_name": {
+   "unit": "text",
+   "label": "That major airport"
+  },
   "tour_beds_change": {
    "unit": "ratio",
    "label": "Change in tourist beds 2019 -> 2026 (INSEE)"
@@ -856,6 +924,19 @@
   "town3000_km": 1.0,
   "town3000_name": 1.0,
   "postcodes": 1.0,
+  "station_name": 1.0,
+  "station_km": 1.0,
+  "station_trains_day": 1.0,
+  "station_passengers": 1.0,
+  "bigcity_train_min": 0.772,
+  "bigcity_train_city": 0.772,
+  "bigcity_train_station": 0.771,
+  "paris_train_min": 0.548,
+  "paris_train_station": 0.548,
+  "airport_km": 1.0,
+  "airport_name": 1.0,
+  "big_airport_km": 1.0,
+  "big_airport_name": 1.0,
   "tour_beds_change": 0.227,
   "tour_beds_added": 0.993,
   "parking_price": 0.052,
@@ -1160,6 +1241,10 @@
   },
   "zfe": {
    "matched": 168,
+   "unmatched": []
+  },
+  "transport": {
+   "matched": 34746,
    "unmatched": []
   },
   "tourism_history": {

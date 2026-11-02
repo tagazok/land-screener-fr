@@ -15,7 +15,7 @@ export interface CatalogEntry {
 
 const UNIT: Record<string, string> = {
   pct: '%', pct_raw: '%', eur: '€', eur_m2: '€/m²', eur_m2_month: '€/m²/mois', count: 'nombre', days: 'jours/an',
-  km: 'km', density: 'hab./km²', num: '', ugl: 'µg/L', m: 'm',
+  km: 'km', density: 'hab./km²', num: '', ugl: 'µg/L', m: 'm', min: 'minutes',
 };
 
 /** Columns the assistant must not touch (identifiers, text, per-year raw series). */
@@ -67,6 +67,8 @@ export const CONCEPTS: { words: RegExp; text: string; columns: string[] }[] = [
   { words: /parking|garage|box|stationnement|place de|voiture/i, columns: ['parking_price', 'n_parking_sales', 'parking_gross_yield', 'parking_gap_share', 'car_share', 'parking_spot_share', 'zfe_share'],
     text: 'investir dans un parking/garage = strategy "parking" ; demande = parking_gap_share min 10 ; prix d’une place = parking_price ; rendement parking = parking_gross_yield (nécessite un loyer saisi)' },
   { words: /rendement|rentab|loyer|invest|cash/i, columns: ['gross_yield', 'net_yield', 'cashflow_month', 'rent_m2'], text: 'rendement en %' },
+  { words: /train|gare|tgv|ter\b|transport|aéroport|aeroport|avion|vol\b/i, columns: ['station_km', 'station_trains_day', 'bigcity_train_min', 'paris_train_min', 'big_airport_km', 'airport_km'],
+    text: 'gare proche = station_km max 5 ; grande ville en moins d’une heure de train = bigcity_train_min max 60 ; Paris en moins de 2 h = paris_train_min max 120 ; grand aéroport à moins d’une heure ≈ big_airport_km max 80' },
   { words: /médecin|medecin|santé|sante|service|école|ecole/i, columns: ['apl_gp', 'services_km', 'college_ips'], text: 'désert médical = apl_gp < 2.5' },
   { words: /crime|cambriol|sécurité|securite|violence/i, columns: ['crime_burglary', 'crime_violence'], text: 'pour 1000 logements / habitants' },
   { words: /air|ozone|particule/i, columns: [], text: 'la qualité de l’air n’est pas encore disponible' },
