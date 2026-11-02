@@ -76,6 +76,8 @@ const RULES: Record<string, Rule> = {
   college_ips: { dir: 1, good: 108, warn: 95, bad: 88 },
   lycee_success: { dir: 1, good: 97, warn: 93, bad: 90 },
   lycee_value_added: { dir: 1, good: 2, bad: -3 },
+  air_days_bad: { dir: -1, good: 15, warn: 35, bad: 60 },
+  air_days_degraded: { dir: -1, good: 80, bad: 150 },
   station_km: { dir: -1, good: 5, bad: 20 },
   station_trains_day: { dir: 1, good: 40, bad: 5 },
   bigcity_train_min: { dir: -1, good: 45, warn: 90, bad: 150 },

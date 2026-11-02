@@ -71,7 +71,8 @@ export const CONCEPTS: { words: RegExp; text: string; columns: string[] }[] = [
     text: 'gare proche = station_km max 5 ; grande ville en moins d’une heure de train = bigcity_train_min max 60 ; Paris en moins de 2 h = paris_train_min max 120 ; grand aéroport à moins d’une heure ≈ big_airport_km max 80' },
   { words: /médecin|medecin|santé|sante|service|école|ecole/i, columns: ['apl_gp', 'services_km', 'college_ips'], text: 'désert médical = apl_gp < 2.5' },
   { words: /crime|cambriol|sécurité|securite|violence/i, columns: ['crime_burglary', 'crime_violence'], text: 'pour 1000 logements / habitants' },
-  { words: /air|ozone|particule/i, columns: [], text: 'la qualité de l’air n’est pas encore disponible' },
+  { words: /\bair\b|ozone|particule|pollution de l|respir/i, columns: ['air_days_bad', 'air_days_degraded'],
+    text: 'air pur = air_days_bad max 15 (jours « mauvais » par an) ; air très pur = air_days_degraded max 60 ; donnée absente dans environ un tiers des communes' },
 ];
 
 const ALWAYS = ['pop', 'risk_count', 'price_m2', 'pop_cagr_11y'];

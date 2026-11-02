@@ -279,6 +279,14 @@
    "credit": null
   },
   {
+   "key": "air",
+   "producer": "Atmo France et les AASQA – indice ATMO quotidien par commune",
+   "licence": "ODbL",
+   "vintage": "novembre 2025 – novembre 2026",
+   "url": "https://data.atmo-france.org/",
+   "credit": "Atmo France / AASQA"
+  },
+  {
    "key": "trains",
    "producer": "SNCF Voyageurs – gares de voyageurs, fréquentation en gares, horaires des trains (GTFS)",
    "licence": "Licence Ouverte 2.0 (gares, fréquentation) ; ODbL (horaires)",
@@ -599,6 +607,22 @@
   "postcodes": {
    "unit": "text",
    "label": "Postal codes of the commune, space-separated (geo.api.gouv.fr)"
+  },
+  "air_days_degraded": {
+   "unit": "days/yr",
+   "label": "Days with ATMO index 'dégradé' or worse for at least one pollutant (last 365 days)"
+  },
+  "air_days_bad": {
+   "unit": "days/yr",
+   "label": "Days with ATMO index 'mauvais' or worse"
+  },
+  "air_main_pollutant": {
+   "unit": "text",
+   "label": "Pollutant most often responsible for those days"
+  },
+  "air_days_known": {
+   "unit": "count",
+   "label": "Days with a published index for the commune"
   },
   "station_name": {
    "unit": "text",
@@ -924,6 +948,10 @@
   "town3000_km": 1.0,
   "town3000_name": 1.0,
   "postcodes": 1.0,
+  "air_days_degraded": 0.636,
+  "air_days_bad": 0.636,
+  "air_main_pollutant": 0.636,
+  "air_days_known": 0.636,
   "station_name": 1.0,
   "station_km": 1.0,
   "station_trains_day": 1.0,
@@ -1242,6 +1270,31 @@
   "zfe": {
    "matched": 168,
    "unmatched": []
+  },
+  "air": {
+   "matched": 22085,
+   "unmatched": [
+    "14011",
+    "97101",
+    "97102",
+    "97103",
+    "97104",
+    "97105",
+    "97106",
+    "97107",
+    "97108",
+    "97109",
+    "97110",
+    "97111",
+    "97112",
+    "97113",
+    "97114",
+    "97115",
+    "97116",
+    "97117",
+    "97118",
+    "97119"
+   ]
   },
   "transport": {
    "matched": 34746,
