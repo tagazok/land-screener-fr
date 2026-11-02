@@ -16,7 +16,7 @@ from pathlib import Path
 import polars as pl
 from shapely.geometry import mapping, shape
 
-from . import contamination, demand, dvf, living, nature, tourism, vigieau
+from . import air, contamination, demand, dvf, living, nature, tourism, transport, vigieau
 from .cog import load_crosswalk, remap
 from .sources import DEPTS, DIS_2025, DVF_YEARS, SOURCES, dep_dir
 
@@ -387,6 +387,23 @@ COLUMNS = {
     "town3000_km": ("km", "Distance to the nearest commune of 3,000+ residents (0 = itself)"),
     "town3000_name": ("text", "Nearest commune of 3,000+ residents"),
     "postcodes": ("text", "Postal codes of the commune, space-separated (geo.api.gouv.fr)"),
+    "air_days_degraded": ("days/yr", "Days with ATMO index 'dégradé' or worse for at least one pollutant (last 365 days)"),
+    "air_days_bad": ("days/yr", "Days with ATMO index 'mauvais' or worse"),
+    "air_main_pollutant": ("text", "Pollutant most often responsible for those days"),
+    "air_days_known": ("count", "Days with a published index for the commune"),
+    "station_name": ("text", "Nearest station with rail departures on a typical weekday (SNCF)"),
+    "station_km": ("km", "Straight-line distance from the commune centre to that station"),
+    "station_trains_day": ("count", "Trains leaving that station on the reference weekday (SNCF GTFS)"),
+    "station_passengers": ("count", "Passengers at that station in 2024 (SNCF)"),
+    "bigcity_train_min": ("min", "Fastest direct train to a city of 150,000+ residents, from a station within 20 km"),
+    "bigcity_train_city": ("text", "That big city"),
+    "bigcity_train_station": ("text", "Station that train leaves from"),
+    "paris_train_min": ("min", "Fastest direct train to Paris, from a station within 20 km"),
+    "paris_train_station": ("text", "Station that train leaves from"),
+    "airport_km": ("km", "Straight-line distance to the nearest airport with scheduled flights (OurAirports)"),
+    "airport_name": ("text", "That airport"),
+    "big_airport_km": ("km", "Straight-line distance to the nearest major airport (about 1M+ passengers a year)"),
+    "big_airport_name": ("text", "That major airport"),
     "tour_beds_change": ("ratio", "Change in tourist beds 2019 -> 2026 (INSEE)"),
     "tour_beds_added": ("beds", "Tourist beds added 2019 -> 2026"),
     "parking_price": ("€", "Median price of one standalone outbuilding (garage/parking/cellar), last 36 months (DVF)"),
@@ -455,6 +472,8 @@ def build(raw: Path, out: Path) -> None:
         ("contamination", lambda: contamination_themes(raw, x)),
         ("nature", lambda: {"relief": nature.relief(raw / "extra" / "bdalti", feats), "forest": nature.forest(feats)}),
         ("zfe", lambda: {"zfe": nature.zfe(raw / "extra" / "zfe-aires.geojson", feats, date.today().isoformat())}),
+        ("air", lambda: {"air": air.metrics(raw / "air", x)}),
+        ("transport", lambda: {"transport": transport.metrics(raw / "extra" / "transport", base, themes["insee"].select("code", "pop"))}),
         ("tourism", lambda: {
             "tourism_history": tourism.capacity_history(raw / "extra" / "tourism", DEPTS, x),
             "second_homes": tourism.second_homes(raw / "serie-historique-2022.zip", DEPTS, x),
@@ -563,6 +582,14 @@ def build(raw: Path, out: Path) -> None:
          "licence": "Licence Ouverte 2.0", "vintage": "2015–2026", "url": "https://www.insee.fr/fr/statistiques/2021703", "credit": None},
         {"key": "zfe", "producer": "Point d’accès national transport.data.gouv.fr – base nationale consolidée des ZFE", "licence": "Licence Ouverte 2.0",
          "vintage": "mise à jour du 26 mars 2026", "url": "https://transport.data.gouv.fr/datasets/base-nationale-consolidee-des-zones-a-faibles-emissions", "credit": None},
+        {"key": "air", "producer": "Atmo France et les AASQA – indice ATMO quotidien par commune",
+         "licence": "ODbL", "vintage": "novembre 2025 – novembre 2026", "url": "https://data.atmo-france.org/",
+         "credit": "Atmo France / AASQA"},
+        {"key": "trains", "producer": "SNCF Voyageurs – gares de voyageurs, fréquentation en gares, horaires des trains (GTFS)",
+         "licence": "Licence Ouverte 2.0 (gares, fréquentation) ; ODbL (horaires)", "vintage": "horaires 2026, fréquentation 2024",
+         "url": "https://ressources.data.sncf.com/", "credit": None},
+        {"key": "airports", "producer": "OurAirports – aéroports avec vols réguliers", "licence": "Domaine public",
+         "vintage": "extraction 2026-11", "url": "https://ourairports.com/data/", "credit": None},
         {"key": "soil", "producer": "Géorisques / BRGM – CASIAS, sites et sols pollués (ex-BASOL), secteurs d’information sur les sols (SIS)",
          "licence": "Licence Ouverte 2.0", "vintage": "extraction 2026-10", "url": "https://www.georisques.gouv.fr/donnees/bases-de-donnees", "credit": None},
     ]

@@ -4,6 +4,9 @@ import maplibregl, { type Map as MlMap } from 'maplibre-gl';
 import mlcss from 'maplibre-gl/dist/maplibre-gl.css?inline';
 import { Protocol } from 'pmtiles';
 import type { Tier } from '../engine';
+import { SALE_COLORS, salesHtml } from '../sales';
+
+export { SALE_COLORS };
 
 export const TIER_COLORS: Record<Tier | 'fail', string> = {
   A: '#1a9850',
@@ -61,6 +64,16 @@ export class MapView extends LitElement {
       #map.dark .maplibregl-ctrl-group { background: #16211c; box-shadow: 0 0 0 1px #25342d; }
       #map.dark .maplibregl-ctrl-group button + button { border-top-color: #25342d; }
       #map.dark .maplibregl-ctrl-group button span { filter: invert(1); }
+      .salepop .maplibregl-popup-content { font: 13px/1.45 system-ui, sans-serif; color: #14201b; padding: 10px 26px 10px 12px; border-radius: 10px; }
+      /* Scroll inside a wrapper: a scrolling .maplibregl-popup-content leaves a white ghost block in Chrome. */
+      .salepop .scroll { max-height: var(--salepop-max, 360px); overflow-y: auto; }
+      .salepop .big { font-size: 16px; font-weight: 700; }
+      .salepop .sub, .salepop .src { color: #5d6b64; font-size: 12px; }
+      .salepop .addr { font-weight: 600; }
+      .salepop .count { font-weight: 700; margin-bottom: 6px; color: #134e33; }
+      .salepop hr { border: 0; border-top: 1px solid #e3e7e2; margin: 8px 0; }
+      .salepop .src { margin-top: 6px; }
+      .salepop a { color: #1f7a4c; font-weight: 600; }
     `,
   ];
 
@@ -72,8 +85,13 @@ export class MapView extends LitElement {
   @property({ type: Boolean }) dark = false;
   /** When set, the map zooms to these bounds (e.g. the chosen département). */
   @property({ attribute: false }) zoomTo: Bounds | null = null;
-  /** Optional background layers drawn under the communes. */
-  @property({ attribute: false }) overlays: { forest: boolean; relief: boolean } = { forest: false, relief: false };
+  /** Optional layers: forest and relief under the communes, individual sales on top. */
+  @property({ attribute: false }) overlays: { forest: boolean; relief: boolean; sales?: boolean } = { forest: false, relief: false };
+  /** URL of the sales PMTiles file (points, from zoom 12). */
+  @property() salesTiles = '';
+  /** The sales layer needs this zoom: below it the map says so. */
+  static SALES_MINZOOM = 12;
+  private popup?: maplibregl.Popup;
 
   private map?: MlMap;
   private styleReady = false;
@@ -113,7 +131,27 @@ export class MapView extends LitElement {
       this.hovered = null;
       this.map!.getCanvas().style.cursor = '';
     });
+    this.map.on('click', 'sales', (e) => {
+      const f = e.features?.[0];
+      if (!f) return;
+      // Every sale under the click (several lots of one building often share a point).
+      const box: [maplibregl.PointLike, maplibregl.PointLike] = [[e.point.x - 4, e.point.y - 4], [e.point.x + 4, e.point.y + 4]];
+      const all = this.map!.queryRenderedFeatures(box, { layers: ['sales'] });
+      const at = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+      this.popup?.remove();
+      // Cap the popup at about half the map so MapLibre can always place it fully
+      // above or below the point instead of sticking out of the map.
+      const h = this.map!.getContainer().clientHeight;
+      this.map!.getContainer().style.setProperty('--salepop-max', `${Math.max(140, Math.min(360, h / 2 - 40))}px`);
+      this.popup = new maplibregl.Popup({ closeButton: true, maxWidth: '300px', className: 'salepop' })
+        .setLngLat(at).setHTML(`<div class="scroll">${salesHtml(all.map((x) => x.properties ?? {}), at)}</div>`).addTo(this.map!);
+    });
+    this.map.on('mouseenter', 'sales', () => (this.map!.getCanvas().style.cursor = 'pointer'));
+    this.map.on('mouseleave', 'sales', () => (this.map!.getCanvas().style.cursor = ''));
+    this.map.on('zoomend', () => this.dispatchEvent(new CustomEvent('zoom', { detail: this.map!.getZoom(), bubbles: true, composed: true })));
     this.map.on('click', 'fill', (e) => {
+      // A click on a sale point opens its popup, not the commune panel.
+      if (this.map!.getLayer('sales') && this.overlays.sales && this.map!.queryRenderedFeatures(e.point, { layers: ['sales'] }).length) return;
       const code = e.features?.[0]?.properties?.code as string | undefined;
       if (code && !this.paint.get(code)?.hidden) this.dispatchEvent(new CustomEvent('select', { detail: code, bubbles: true, composed: true }));
     });
@@ -158,6 +196,19 @@ export class MapView extends LitElement {
         paint: { 'line-color': this.dark ? '#c9d6cf' : '#2c3e36', 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.6, 10, 1.6], 'line-opacity': 0.55 },
       });
     }
+    if (this.salesTiles) {
+      m.addSource('sales', { type: 'vector', url: `pmtiles://${new URL(this.salesTiles, location.href).href}`,
+        attribution: 'Ventes : DVF (DGFiP)' });
+      m.addLayer({
+        id: 'sales', type: 'circle', source: 'sales', 'source-layer': 'sales', minzoom: MapView.SALES_MINZOOM, layout: { visibility: 'none' },
+        paint: {
+          'circle-color': ['match', ['get', 't'], 'M', SALE_COLORS.M, 'A', SALE_COLORS.A, 'T', SALE_COLORS.T, SALE_COLORS.D],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 16, 7],
+          'circle-stroke-color': this.dark ? '#0f1714' : '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 1.5],
+          'circle-opacity': 0.9,
+        },
+      });
+    }
     m.addLayer({
       id: 'highlight', type: 'line', source: SRC, 'source-layer': LAYER,
       paint: {
@@ -183,6 +234,8 @@ export class MapView extends LitElement {
     for (const id of Object.keys(OVERLAYS) as (keyof typeof OVERLAYS)[]) {
       m.setLayoutProperty(id, 'visibility', this.overlays[id] ? 'visible' : 'none');
     }
+    if (m.getLayer('sales')) m.setLayoutProperty('sales', 'visibility', this.overlays.sales ? 'visible' : 'none');
+    if (!this.overlays.sales) this.popup?.remove();
     m.setPaintProperty('fill', 'fill-opacity', this.fillOpacity());
   }
 
@@ -200,8 +253,20 @@ export class MapView extends LitElement {
     if (this.selected) this.setState(this.selected, { selected: true });
   }
 
-  flyTo(lon: number, lat: number) {
-    this.map?.flyTo({ center: [lon, lat], zoom: Math.max(this.map.getZoom(), 10) });
+  private marker?: maplibregl.Marker;
+
+  /** Show a pin at [lon, lat] (an address the user looked up), or remove it with null. */
+  mark(at: [number, number] | null) {
+    this.marker?.remove();
+    this.marker = undefined;
+    if (at && this.map) this.marker = new maplibregl.Marker({ color: '#b42318' }).setLngLat(at).addTo(this.map);
+  }
+
+  /** Fly to a point (NaN = stay centred), at least at `zoom` (10 by default). */
+  flyTo(lon: number, lat: number, zoom = 10) {
+    if (!this.map) return;
+    const center = Number.isFinite(lon) && Number.isFinite(lat) ? ([lon, lat] as [number, number]) : this.map.getCenter();
+    this.map.flyTo({ center, zoom: Math.max(this.map.getZoom(), zoom) });
   }
 
   updated(changed: Map<string, unknown>) {

@@ -34,7 +34,8 @@ const RULES: Record<string, Rule> = {
   water_limit_breach_share: { dir: -1, good: 0, bad: 0.02 },
   pesticide_breach_share: { dir: -1, good: 0, bad: 0.05 },
   pfas_max: { dir: -1, good: 0.02, bad: 0.1 },
-  pfas_breach_share: { dir: -1, good: 0, bad: 0 },
+  // Any sample over the limit is bad news; 0 % is good (bad must be > 0, or 0 % would read as bad).
+  pfas_breach_share: { dir: -1, good: 0, bad: 0.0001 },
   sis_count: { dir: -1, good: 0, bad: 1 },
   polluted_site_count: { dir: -1, good: 0, bad: 2 },
   casias_per_km2: { dir: -1, good: 0.2, bad: 3 },
@@ -75,6 +76,14 @@ const RULES: Record<string, Rule> = {
   college_ips: { dir: 1, good: 108, warn: 95, bad: 88 },
   lycee_success: { dir: 1, good: 97, warn: 93, bad: 90 },
   lycee_value_added: { dir: 1, good: 2, bad: -3 },
+  air_days_bad: { dir: -1, good: 15, warn: 35, bad: 60 },
+  air_days_degraded: { dir: -1, good: 80, bad: 150 },
+  station_km: { dir: -1, good: 5, bad: 20 },
+  station_trains_day: { dir: 1, good: 40, bad: 5 },
+  bigcity_train_min: { dir: -1, good: 45, warn: 90, bad: 150 },
+  paris_train_min: { dir: -1, good: 120, bad: 240 },
+  airport_km: { dir: -1, good: 40, bad: 100 },
+  big_airport_km: { dir: -1, good: 60, bad: 150 },
   tfpb_total_avg_eur: { dir: -1, good: 600, bad: 2000 },
 };
 

@@ -48,6 +48,13 @@ def cmd_build(args: argparse.Namespace) -> None:
     build(RAW, OUT)
 
 
+def cmd_sales(args: argparse.Namespace) -> None:
+    from .build import DVF_END
+    from .sales import write
+
+    write(RAW, OUT, DVF_END)
+
+
 def cmd_summarize(args: argparse.Namespace) -> None:
     from .summarize import summarize
 
@@ -64,6 +71,7 @@ def main() -> None:
     f.set_defaults(func=cmd_fetch)
     b = sub.add_parser("build")
     b.set_defaults(func=cmd_build)
+    sub.add_parser("sales", help="individual sales as map points (sales.pmtiles)").set_defaults(func=cmd_sales)
     s = sub.add_parser("summarize", help="generate AI summaries with Amazon Bedrock (cached)")
     s.add_argument("--limit", type=int)
     s.add_argument("--depts", nargs="*", help="only these départements, e.g. --depts 33 40")

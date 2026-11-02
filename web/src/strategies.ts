@@ -8,7 +8,7 @@ export type PropertyType = 'house' | 'apt';
 
 export interface ColumnInfo {
   label: string;
-  unit: 'eur' | 'eur_m2' | 'eur_m2_month' | 'pct' | 'pct_raw' | 'count' | 'days' | 'bool' | 'text' | 'num' | 'density' | 'km' | 'ugl' | 'm';
+  unit: 'eur' | 'eur_m2' | 'eur_m2_month' | 'pct' | 'pct_raw' | 'count' | 'days' | 'bool' | 'text' | 'num' | 'density' | 'km' | 'ugl' | 'm' | 'min';
   /** What the value means. */
   def?: string;
   /** How it is calculated, and from which source. */
@@ -245,6 +245,38 @@ export const COLUMNS: Record<string, ColumnInfo> = {
     calc: 'distance à vol d’oiseau entre les centres des communes (population INSEE 2022). Par la route, comptez environ 1,3 fois plus.',
   },
   town3000_name: { label: 'Ville proche (3 000 hab. +)', unit: 'text' },
+  air_days_bad: {
+    label: 'Jours d’air mauvais/an', unit: 'days',
+    def: 'Nombre de jours sur les 12 derniers mois où l’indice de qualité de l’air ATMO était « mauvais » ou pire pour au moins un polluant (ozone, particules, dioxyde d’azote…). Ces jours-là, les personnes fragiles sont invitées à limiter les efforts dehors.',
+    calc: 'indice ATMO quotidien par commune (Atmo France et AASQA, novembre 2025 à novembre 2026). Ramené à 365 jours si quelques jours manquent ; vide si moins de 200 jours publiés. L’indice suit des seuils européens, moins stricts que les recommandations de l’OMS.',
+  },
+  air_days_degraded: {
+    label: 'Jours d’air dégradé/an', unit: 'days',
+    def: 'Nombre de jours où l’indice ATMO était au moins « dégradé » (niveau 3 sur 6) pour un polluant. En été, l’ozone rend ces jours fréquents presque partout ; comparez surtout les jours « mauvais ».',
+    calc: 'même source et méthode que les jours « mauvais ».',
+  },
+  air_main_pollutant: { label: 'Polluant principal', unit: 'text', def: 'Polluant le plus souvent responsable des jours d’air dégradé ou pire.', calc: 'indice ATMO quotidien.' },
+  station_name: { label: 'Gare la plus proche', unit: 'text', def: 'Gare de voyageurs la plus proche du centre de la commune qui a des trains un jour de semaine ordinaire (hors cars TER).', calc: 'liste des gares SNCF et horaires SNCF (GTFS, TGV INOUI, OUIGO, Intercités, TER), distance à vol d’oiseau.' },
+  station_km: { label: 'Distance à la gare', unit: 'km', def: 'Distance à vol d’oiseau entre le centre de la commune et la gare la plus proche. Par la route, comptez environ 1,3 fois plus.' },
+  station_trains_day: { label: 'Trains par jour (gare)', unit: 'count', def: 'Nombre de trains qui partent de cette gare un mardi ordinaire, toutes directions confondues. Une halte avec moins de 10 trains par jour est surtout utile aux heures de pointe.', calc: 'horaires SNCF (GTFS), mardi le plus chargé de la période publiée ; trains seulement, sans les cars.' },
+  station_passengers: { label: 'Voyageurs par an (gare)', unit: 'count', def: 'Nombre de voyageurs de cette gare en 2024.', calc: 'SNCF, fréquentation en gares.' },
+  bigcity_train_min: {
+    label: 'Train vers une grande ville', unit: 'min',
+    def: 'Durée du train direct le plus rapide vers une ville de 150 000 habitants ou plus (Paris, Lyon, Marseille, Toulouse, Bordeaux, Lille, Nantes, Rennes, Strasbourg, Montpellier, Nice…), depuis une gare située à moins de 20 km. 0 = la commune est elle-même une grande ville.',
+    calc: 'horaires SNCF (GTFS) : pour chaque gare, le trajet direct (sans correspondance) le plus court vers une gare d’une grande ville, puis le meilleur parmi les gares à moins de 20 km de la commune. Le trajet jusqu’à la gare n’est pas compté.',
+  },
+  bigcity_train_city: { label: 'Grande ville la plus rapide', unit: 'text', def: 'La grande ville atteinte par ce train direct.' },
+  bigcity_train_station: { label: 'Gare de départ (grande ville)', unit: 'text', def: 'La gare d’où part ce train direct.' },
+  paris_train_min: {
+    label: 'Train direct vers Paris', unit: 'min',
+    def: 'Durée du train direct le plus rapide vers une gare de Paris, depuis une gare à moins de 20 km. Vide s’il n’y a pas de train direct.',
+    calc: 'horaires SNCF (GTFS), trajets sans correspondance.',
+  },
+  paris_train_station: { label: 'Gare de départ (Paris)', unit: 'text', def: 'La gare d’où part ce train direct pour Paris.' },
+  airport_km: { label: 'Aéroport le plus proche', unit: 'km', def: 'Distance à vol d’oiseau jusqu’à l’aéroport le plus proche qui a des vols réguliers. Les aérodromes et petits terrains d’aviation ne comptent pas.', calc: 'OurAirports (aéroports « medium » et « large » avec vols réguliers).' },
+  airport_name: { label: 'Aéroport (vols réguliers)', unit: 'text' },
+  big_airport_km: { label: 'Grand aéroport le plus proche', unit: 'km', def: 'Distance à vol d’oiseau jusqu’au grand aéroport le plus proche : environ 1 million de passagers par an ou plus, avec beaucoup de destinations.', calc: 'Paris-CDG, Paris-Orly, Beauvais, Nice, Lyon, Marseille, Toulouse, Bordeaux, Nantes, Bâle-Mulhouse, Lille, Montpellier, Strasbourg, Biarritz, Ajaccio, Bastia. Les aéroports étrangers proches (Genève, Bruxelles…) ne sont pas comptés.' },
+  big_airport_name: { label: 'Grand aéroport', unit: 'text' },
   tour_beds_change: {
     label: 'Évolution des lits touristiques', unit: 'pct',
     def: 'Évolution du nombre de lits touristiques entre 2019 et 2026 : une hausse signale une commune qui devient plus touristique.',
@@ -574,6 +606,10 @@ const CONTAMINATION_FILTERS = () => [
   f('town', 'town3000_km', 'max', 10, false),
   f('tourgrowth', 'tour_beds_change', 'min', 0.05, false),
   f('shgrowth', 'second_homes_change', 'min', 0.1, false),
+  // Transport (off by default too).
+  f('bigcitytrain', 'bigcity_train_min', 'max', 60, false),
+  f('bigairport', 'big_airport_km', 'max', 80, false),
+  f('airbad', 'air_days_bad', 'max', 20, false),
 ];
 
 export const STRATEGIES: Strategy[] = [
@@ -930,6 +966,18 @@ export const FILTERS: Record<string, { label: string; help: string }> = {
     label: 'Anciens sites industriels max. /km²',
     help: 'Élimine les communes ayant plus que ce nombre d’anciens sites industriels ou d’activités de service (CASIAS) par km². Utile pour un potager ou des poules dans un secteur peu industrialisé ; cela ne dit rien de votre terrain précis.',
   },
+  bigcitytrain: {
+    label: 'Train vers une grande ville maximum (min)',
+    help: 'Élimine les communes sans train direct vers une ville de 150 000 habitants ou plus en moins de ce nombre de minutes, depuis une gare à moins de 20 km. Les communes sans aucun train direct passent ce filtre (donnée absente) : ajoutez une distance à la gare si besoin.',
+  },
+  airbad: {
+    label: 'Jours d’air mauvais/an maximum',
+    help: 'Élimine les communes où l’indice de qualité de l’air a été « mauvais » ou pire plus de ce nombre de jours sur les 12 derniers mois. Les communes sans donnée (environ un tiers) passent ce filtre.',
+  },
+  bigairport: {
+    label: 'Grand aéroport à moins de (km)',
+    help: 'Élimine les communes à plus de cette distance (à vol d’oiseau) d’un grand aéroport (environ 1 million de passagers par an ou plus).',
+  },
   fibre: {
     label: 'Fibre minimum (% des logements)',
     help: 'Élimine les communes où moins de ce pourcentage de logements a accès à la fibre. Utile pour le télétravail.',
@@ -984,8 +1032,10 @@ export const DETAIL_GROUPS: { title: string; help?: string; columns: string[] }[
   { title: 'Tourisme', columns: ['tourist_beds_per_1000', 'tour_beds_change', 'tour_beds_added', 'second_home_share', 'second_homes_2022', 'second_homes_change', 'second_home_share_change'] },
   { title: 'Nature et relief', help: 'Forêt : ESA WorldCover 2021. Altitudes : BD ALTI de l’IGN. Affichez aussi les forêts et le relief sur la carte avec les boutons au-dessus.', columns: ['forest_around_share', 'forest_share', 'relief_m', 'alt_mean', 'alt_min', 'alt_max'] },
   { title: 'Santé et services', help: 'Distances à vol d’oiseau jusqu’à la commune la plus proche qui a le service ; 0 km = dans la commune.', columns: ['apl_gp', 'apl_gp_65', 'gp_count', 'services_km', 'dist_gp_km', 'dist_pharmacy_km', 'dist_supermarket_km', 'dist_bakery_km', 'dist_primary_school_km', 'dist_college_km', 'dist_lycee_km', 'dist_post_km', 'dist_emergency_km', 'dist_train_km', 'fibre_share'] },
+  { title: 'Transports', help: 'Gares et horaires SNCF, aéroports avec vols réguliers (OurAirports). Distances à vol d’oiseau depuis le centre de la commune ; durées de trains directs, sans correspondance.', columns: ['station_name', 'station_km', 'station_trains_day', 'station_passengers', 'bigcity_train_min', 'bigcity_train_city', 'bigcity_train_station', 'paris_train_min', 'paris_train_station', 'big_airport_km', 'big_airport_name', 'airport_km', 'airport_name'] },
   { title: 'Sécurité', help: 'Faits enregistrés par la police et la gendarmerie en 2025. Une commune touristique ou un pôle commercial a mécaniquement plus de faits par habitant (visiteurs non comptés dans la population).', columns: ['crime_burglary', 'crime_violence', 'crime_damage', 'crime_theft', 'crime_estimated'] },
   { title: 'Écoles', columns: ['college_ips', 'college_ips_km', 'lycee_success', 'lycee_value_added', 'lycee_success_km'] },
+  { title: 'Air', help: 'Indice ATMO quotidien publié par les associations régionales de surveillance de la qualité de l’air, sur les 365 derniers jours. Toutes ne le publient pas commune par commune : environ un tiers des communes n’ont pas de donnée.', columns: ['air_days_bad', 'air_days_degraded', 'air_main_pollutant'] },
   { title: 'Eau', columns: ['drinking_water_days_avg', 'drought_days_avg', 'crisis_days_avg', 'water_limit_breach_share'] },
   { title: 'Contamination', help: 'Eau du robinet (analyses 2025 des ARS) et inventaires des sols pollués (Géorisques). Pour un potager ou des poules, ces chiffres signalent une commune à vigilance ; seule une analyse de sol de votre terrain dit s’il est pollué.', columns: ['pesticide_breach_share', 'pesticide_samples', 'pfas_max', 'pfas_breach_share', 'pfas_samples', 'sis_count', 'polluted_site_count', 'casias_count', 'casias_per_km2'] },
   { title: 'Sols, côte et risques', columns: ['risk_count', 'risk_list', 'clay_high_share', 'clay_med_high_share', 'catnat_drought', 'ppr_flood', 'catnat_flood', 'risk_marine_flood', 'coast_retreat_decree', 'risk_coast_erosion', 'risk_forest_fire', 'ppr_industrial', 'radon_class'] },
@@ -996,7 +1046,7 @@ export const DETAIL_GROUPS: { title: string; help?: string; columns: string[] }[
 export const HELP = {
   finance: 'Le rendement net et le cash-flow sont calculés pour chaque commune avec ces hypothèses, à partir du prix médian au m² (DVF), du loyer estimé (ANIL) et de la taxe foncière moyenne de la commune.\n\nC’est une estimation pour comparer les communes, pas une simulation bancaire : impôt sur le revenu, assurance emprunteur, travaux et frais de garantie ne sont pas comptés. Les hypothèses sont enregistrées dans le lien de partage.',
   tourism: 'Barres : nombre de lits touristiques recensés chaque année par l’INSEE (au 1er janvier), de 2015 à 2026. Calcul INSEE : une chambre d’hôtel = 2 lits, un emplacement de camping = 3 lits, plus les lits des villages vacances, résidences de tourisme et auberges de jeunesse.\n\nLes meublés de tourisme de particuliers (type Airbnb) ne sont pas comptés : une commune qui devient touristique par la location entre particuliers se voit plutôt à la hausse de ses résidences secondaires (recensements 2011, 2016, 2022).',
-  overlays: 'Fonds de carte de l’IGN, superposés aux communes (dont les couleurs s’éclaircissent pour rester lisibles).\n\nForêts : masque forêt IGN 2021–2023, visible à partir du zoom régional.\nRelief : relief ombré (estompage) issu des altitudes de l’IGN.\n\nPour filtrer, utilisez « Forêt autour » et « Dénivelé » dans les filtres.',
+  overlays: 'Fonds de carte de l’IGN, superposés aux communes (dont les couleurs s’éclaircissent pour rester lisibles).\n\nForêts : masque forêt IGN 2021–2023, visible à partir du zoom régional.\nRelief : relief ombré (estompage) issu des altitudes de l’IGN.\n\nPour filtrer, utilisez « Forêt autour » et « Dénivelé » dans les filtres.\n\nVentes : chaque vente des 24 derniers mois (DVF, 2024–2025), en points colorés par type : maison, appartement, terrain à bâtir, dépendance. Visibles en zoomant sur une commune ; cliquez un point pour son prix, sa surface et sa date. Les ventes de plusieurs logements ensemble ou avec un local commercial ne sont pas montrées (leur prix ne se répartit pas).',
   history: 'Prix médian au m² des ventes de maisons et d’appartements, et nombre de ventes, par année de vente (DVF, ventes d’un seul logement). Plus il y a de ventes, plus la médiane est fiable.',
   scope: 'Sans sélection : toute la France, les communes sont comparées à l’échelle nationale.\n\nAvec un ou plusieurs départements : la carte et le tableau ne montrent que leurs communes, et le score, les groupes A à E et les médianes sont recalculés en ne comparant que ces communes entre elles. La sélection est enregistrée dans le lien de partage.',
   filters: 'Un filtre élimine les communes qui ne respectent pas la condition. Décochez-le pour le désactiver.\n\nLe nombre en rouge indique combien de communes ce filtre élimine (une même commune peut être éliminée par plusieurs filtres).',

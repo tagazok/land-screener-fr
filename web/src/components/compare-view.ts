@@ -144,8 +144,10 @@ export class CompareView extends LitElement {
         ${tip('Différences seulement', 'Masque les lignes où les communes ont la même valeur, ou des valeurs à moins de 5 % les unes des autres.')}
         <button class="btn" @click=${() => this.emit('copy-link')}>${this.copied ? 'Lien copié ✓' : 'Copier le lien'}</button>
         <button class="btn" ?disabled=${!cities.length} @click=${() => this.exportCsv(cities, groups)}>Exporter CSV</button>
+        <button class="btn" ?disabled=${!cities.length} title="Imprimer la comparaison, ou l’enregistrer en PDF" @click=${() => window.print()}>Imprimer</button>
       </div>
 
+      <p class="printonly">Land Screener FR · comparaison du ${new Date().toLocaleDateString('fr-FR')} · ${location.href}</p>
       <div class="scroller card">
         <table style="--n:${cities.length + (canAdd ? 1 : 0)}">
           <thead>
@@ -283,5 +285,16 @@ export class CompareView extends LitElement {
     .acmenu .i.hl { background: var(--brand-soft); }
     .acmenu .none { padding: 10px; color: var(--muted); font-size: 13px; }
     .hint { margin-top: 6px; }
+    .printonly { display: none; }
+    @media print {
+      :host { padding: 0; }
+      .bar, .btn, .switchlabel, info-tip, .x, .star, th.add, td:last-child:empty { display: none !important; }
+      .scroller { max-height: none; overflow: visible; box-shadow: none; }
+      table { min-width: 0; font-size: 11px; }
+      th, td { padding: 4px 6px; }
+      tr.names th, th.corner, td.label { position: static; }
+      tr { break-inside: avoid; }
+      .printonly { display: block; font-size: 11px; color: #555; margin: 0; }
+    }
   `;
 }

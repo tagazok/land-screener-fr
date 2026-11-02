@@ -29,6 +29,10 @@ export function fmt(column: string, v: Value | undefined): string {
       return `${one.format(v)} %`;
     case 'km':
       return v === 0 ? 'sur place' : `${one.format(v)} km`;
+    case 'min': {
+      const h = Math.floor(v / 60), m = Math.round(v % 60);
+      return v === 0 ? 'sur place' : h ? `${h} h ${String(m).padStart(2, '0')}` : `${m} min`;
+    }
     case 'm':
       return `${int.format(v)} m`;
     case 'ugl':

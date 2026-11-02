@@ -14,11 +14,12 @@ import {
 } from '../strategies';
 import { customFilter, decode, encode } from '../url';
 import { adLinks, firstPostcode } from '../links';
-import { TIER_COLORS, type Bounds, type MapView, type Paint } from './map-view';
+import { MapView, SALE_COLORS, TIER_COLORS, type Bounds, type Paint } from './map-view';
 import './map-view';
 import './info-tip';
 import './ai-chat';
 import './compare-view';
+import './address-risk';
 import type { CompareView } from './compare-view';
 import { MAX_COMPARE } from '../compare';
 import { loadFavorites, toggleFavorite } from '../favorites';
@@ -121,7 +122,20 @@ export class AppRoot extends LitElement {
   @state() private finance: Finance = { ...DEFAULT_FINANCE };
   @state() private colorBy = 'score';
   /** Background map layers (IGN forest mask, shaded relief). */
-  @state() private overlays = { forest: false, relief: false };
+  @state() private overlays = { forest: false, relief: false, sales: false };
+  /** Current map zoom (the sales layer only shows from zoom 12). */
+  @state() private mapZoom = 5;
+
+  private toggleOverlay(k: 'forest' | 'relief' | 'sales') {
+    this.overlays = { ...this.overlays, [k]: !this.overlays[k] };
+    if (k === 'sales' && this.overlays.sales && this.selected) this.zoomToSales();
+  }
+
+  /** Fly to the open commune (or the map centre) close enough for the sale points. */
+  private zoomToSales() {
+    const r = this.selected ? this.raw.find((x) => x.code === this.selected) : undefined;
+    this.mapView?.flyTo(r ? (r.lon as number) : NaN, r ? (r.lat as number) : NaN, 13);
+  }
   @state() private greyFailing = true;
   @state() private columns: string[] = [];
   @state() private theme: 'auto' | 'light' | 'dark' = 'auto';
@@ -314,6 +328,15 @@ export class AppRoot extends LitElement {
       </details>`;
   }
 
+  /** Print the open commune's sheet (or save it as PDF): every section unfolded, the rest of the page hidden. */
+  private printSheet() {
+    const closed = [...this.renderRoot.querySelectorAll<HTMLDetailsElement>('.sidenav details:not([open])')];
+    closed.forEach((d) => (d.open = true));
+    const restore = () => { closed.forEach((d) => (d.open = false)); window.removeEventListener('afterprint', restore); };
+    window.addEventListener('afterprint', restore);
+    this.updateComplete.then(() => window.print());
+  }
+
   private favButton(code: string, label = false) {
     const on = this.favorites.includes(code);
     return html`<button class="favbtn ${on ? 'on' : ''} ${label ? 'labelled' : ''}" aria-pressed=${on ? 'true' : 'false'}
@@ -473,7 +496,7 @@ export class AppRoot extends LitElement {
       applied.push(`Carte : ${COLUMNS[plan.color_by].label}`);
     }
     if (plan.forest_layer !== null || plan.relief_layer !== null) {
-      this.overlays = { forest: plan.forest_layer ?? this.overlays.forest, relief: plan.relief_layer ?? this.overlays.relief };
+      this.overlays = { ...this.overlays, forest: plan.forest_layer ?? this.overlays.forest, relief: plan.relief_layer ?? this.overlays.relief };
       if (plan.forest_layer !== null) applied.push(plan.forest_layer ? 'Forêts affichées' : 'Forêts masquées');
       if (plan.relief_layer !== null) applied.push(plan.relief_layer ? 'Relief affiché' : 'Relief masqué');
     }
@@ -516,11 +539,12 @@ export class AppRoot extends LitElement {
   }
 
   private select(code: string | null, fly = false) {
+    if (code !== this.selected) this.mapView?.mark(null);
     this.selected = code;
     this.pushUrl();
     if (fly && code) {
       const r = this.raw.find((x) => x.code === code);
-      if (r) this.mapView?.flyTo(r.lon as number, r.lat as number);
+      if (r) this.mapView?.flyTo(r.lon as number, r.lat as number, this.overlays.sales ? 13 : undefined);
     }
   }
 
@@ -877,10 +901,11 @@ export class AppRoot extends LitElement {
               @change=${(e: Event) => (this.greyFailing = (e.target as HTMLInputElement).checked)}> Griser les communes éliminées</label>` : nothing}
           <div class="seg" role="group" aria-label="Fonds de carte">
             ${([['forest', 'Forêts', 'Afficher les forêts (IGN, masque forêt 2021–2023). Visible à partir du zoom régional.'],
-                ['relief', 'Relief', 'Afficher le relief ombré (IGN, estompage)']] as const).map(([k, l, title]) => html`
+                ['relief', 'Relief', 'Afficher le relief ombré (IGN, estompage)'],
+                ['sales', 'Ventes', 'Afficher chaque vente des 24 derniers mois (DVF) : maisons, appartements, terrains, dépendances. Visible en zoomant sur une commune.']] as const).map(([k, l, title]) => html`
               <button aria-pressed=${this.overlays[k] ? 'true' : 'false'} class=${this.overlays[k] ? 'on' : ''} title=${title}
-                @click=${() => (this.overlays = { ...this.overlays, [k]: !this.overlays[k] })}>${l}</button>`)}
-          </div>${tip('Forêts et relief', HELP.overlays)}
+                @click=${() => this.toggleOverlay(k)}>${l}</button>`)}
+          </div>${tip('Forêts, relief et ventes', HELP.overlays)}
           <span class="grow"></span>
           <span class="hint">Cliquez une commune pour son détail</span>
           <button class="btn icon" @click=${() => this.setMapFull(!this.mapFull)}
@@ -892,9 +917,16 @@ export class AppRoot extends LitElement {
         </div>
         <div class="mapwrap">
           <map-view .tiles=${'./data/communes.pmtiles'} .departements=${this.departements} .zoomTo=${this.zoomTo}
-            .paint=${paint} .selected=${this.selected} .dark=${this.dark} .overlays=${this.overlays}
-            @select=${(e: CustomEvent<string>) => this.select(e.detail)}></map-view>
+            .paint=${paint} .selected=${this.selected} .dark=${this.dark} .overlays=${this.overlays} .salesTiles=${'./data/sales.pmtiles'}
+            @select=${(e: CustomEvent<string>) => this.select(e.detail)} @zoom=${(e: CustomEvent<number>) => (this.mapZoom = e.detail)}></map-view>
           ${this.renderScale(label, scale)}
+          ${this.overlays.sales ? html`
+            <div class="saleskey" aria-label="Légende des ventes">
+              ${(['M', 'A', 'T', 'D'] as const).map((t) => html`<span><i style="background:${SALE_COLORS[t]}"></i>${({ M: 'Maison', A: 'Appartement', T: 'Terrain', D: 'Dépendance' })[t]}</span>`)}
+              ${this.mapZoom < MapView.SALES_MINZOOM
+                ? html`<button class="link" @click=${() => this.zoomToSales()}>Zoomez sur une commune pour voir les ventes</button>`
+                : html`<small>Cliquez un point pour le détail · ventes 2024–2025</small>`}
+            </div>` : nothing}
         </div>
       </div>`;
   }
@@ -1078,12 +1110,14 @@ export class AppRoot extends LitElement {
                 ${this.favButton(row.code, true)}
                 <button class="btn small" title="Comparer cette commune avec d’autres, côte à côte"
                   @click=${() => this.openCompare([row.code, ...(this.compare ?? [])], true)}>⇆ Comparer…</button>
+                <button class="btn small" title="Imprimer cette fiche, ou l’enregistrer en PDF" @click=${() => this.printSheet()}>Imprimer</button>
               </div>
             </div>
           </div>
           <button class="close" aria-label="Fermer le panneau" title="Fermer (Échap)" @click=${() => this.select(null)}>×</button>
         </div>
         <div class="sn-body">
+          <p class="printonly">Land Screener FR · stratégie « ${STRATEGIES.find((s) => s.id === this.strategy)?.label} » · fiche du ${new Date().toLocaleDateString('fr-FR')} · données du ${this.meta ? new Date(this.meta.built).toLocaleDateString('fr-FR') : ''} · ${location.href}</p>
           ${r.pass
             ? html`<div class="sn-score">
                 <div><span class="label">Score ${tip('Score', HELP.score)}</span><b>${fmt('score', r.score)}</b><small>/100</small></div>
@@ -1131,6 +1165,11 @@ export class AppRoot extends LitElement {
           ${this.detailWarnings(row)}
           ${this.strategy === 'parking' ? this.renderParkingSimulation(row) : this.renderSimulation(row)}
           ${this.renderHistory(row)}
+          <details class="grp" @toggle=${(e: Event) => { if (!(e.target as HTMLDetailsElement).open) this.mapView?.mark(null); }}>
+            <summary>Risques à une adresse${tip('Risques à une adresse', 'Tapez une adresse de la commune : l’application interroge Géorisques (Ministère de la Transition écologique) et affiche les risques à ce point précis, à côté de ceux de la commune. C’est la même source que l’état des risques d’une vente, mais ce n’est pas un document officiel.')}</summary>
+            <address-risk .code=${row.code} .commune=${row.nom}
+              @locate=${(e: CustomEvent<{ lon: number; lat: number }>) => { this.mapView?.mark([e.detail.lon, e.detail.lat]); this.mapView?.flyTo(e.detail.lon, e.detail.lat, 15); }}></address-risk>
+          </details>
           ${this.renderTourism(row)}
 
           ${DETAIL_GROUPS.map((g) => html`
@@ -1559,6 +1598,13 @@ export class AppRoot extends LitElement {
     .ai p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.55; }
     .ai p.muted { color: var(--muted); display: flex; align-items: center; gap: 8px; }
 
+    /* ---- sales legend ---- */
+    .saleskey { position: absolute; left: 52px; top: 10px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; max-width: calc(100% - 290px);
+      background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font-size: 12.5px; box-shadow: var(--shadow); }
+    .saleskey span { display: inline-flex; align-items: center; gap: 5px; }
+    .saleskey i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
+    .saleskey small { color: var(--muted); } .saleskey .link { font-size: 12.5px; }
+
     /* ---- favourites ---- */
     .favmenu { position: relative; }
     .favmenu summary { list-style: none; } .favmenu summary::-webkit-details-marker { display: none; }
@@ -1685,6 +1731,21 @@ export class AppRoot extends LitElement {
     .code { margin: 0; font-size: 12px; color: var(--faint); }
     .close { border: 0; background: var(--surface-3); width: 32px; height: 32px; border-radius: 10px; font-size: 20px; line-height: 1; cursor: pointer; color: var(--ink-2); flex: none; }
     .close:hover { background: var(--track); } .close:focus-visible { outline: 2px solid var(--brand-2); }
+
+    /* ---- print: the commune sheet, or the comparison page, alone on paper ---- */
+    .printonly { display: none; }
+    @media print {
+      :host { --shadow: none; }
+      header, ai-chat, .loading, .backdrop, .drawer, .close, .sn-acts { display: none !important; }
+      .layout { display: block !important; }
+      .layout.has-detail > main { display: none !important; }
+      .sidenav { position: static !important; height: auto !important; width: auto !important; border: 0 !important; box-shadow: none !important; }
+      .sn-body { overflow: visible !important; padding: 0 !important; }
+      .sn-head { padding: 0 0 10px !important; }
+      .grp, .hl, .sim, .ai, .note { break-inside: avoid; }
+      address-risk input { display: none; }
+      .printonly { display: block; font-size: 11px; color: #555; margin: 0 0 8px; }
+    }
 
     /* ---- settings drawer ---- */
     .backdrop { position: fixed; inset: 0; background: rgba(10, 25, 18, .35); z-index: 40; animation: fade .15s ease-out; }
