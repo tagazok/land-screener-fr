@@ -5,7 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex" />
     <title>Land Screener FR · Gironde v0</title>
-    <style>body { margin: 0; }</style>
+    <style>
+      body { margin: 0; }
+      @media print { html, body { background: #fff !important; } }
+      /* Printed sheets: A4 margins and a page counter (page rules only work in the document, not in a shadow root). */
+      @page {
+        size: A4; margin: 12mm 12mm 14mm;
+        @bottom-left { content: "Land Screener FR"; font: 7.5pt system-ui, sans-serif; color: #8b9791; }
+        @bottom-right { content: "Page " counter(page) " / " counter(pages); font: 7.5pt system-ui, sans-serif; color: #8b9791; }
+      }
+    </style>
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>

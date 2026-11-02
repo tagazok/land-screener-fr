@@ -269,6 +269,46 @@ export class MapView extends LitElement {
     this.map.flyTo({ center, zoom: Math.max(this.map.getZoom(), zoom) });
   }
 
+  /** Bounds of one commune from the tiles already loaded, or null. */
+  private communeBounds(code: string): [[number, number], [number, number]] | null {
+    const m = this.map;
+    if (!m) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const walk = (c: unknown): void => {
+      if (typeof (c as number[])[0] === 'number') {
+        const [x, y] = c as [number, number];
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      } else (c as unknown[]).forEach(walk);
+    };
+    for (const f of m.querySourceFeatures(SRC, { sourceLayer: LAYER, filter: ['==', ['get', 'code'], code] })) {
+      if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') walk(f.geometry.coordinates);
+    }
+    return Number.isFinite(x0) ? [[x0, y0], [x1, y1]] : null;
+  }
+
+  /** A JPEG of the map framed on one commune, for the printed sheet. The view is put back afterwards. */
+  async snapshot(code: string, lon: number, lat: number): Promise<string | null> {
+    const m = this.map;
+    if (!m || !m.getSource(SRC)) return null;
+    const cam = { center: m.getCenter(), zoom: m.getZoom() };
+    const idle = () => new Promise<void>((res) => {
+      const t = setTimeout(res, 4000);
+      m.once('idle', () => { clearTimeout(t); res(); });
+    });
+    this.popup?.remove();
+    m.jumpTo({ center: [lon, lat], zoom: 11 });
+    await idle();
+    const b = this.communeBounds(code);
+    if (b) { m.fitBounds(b, { padding: 30, animate: false, maxZoom: 15 }); await idle(); }
+    // The WebGL buffer is only readable right after a frame is drawn.
+    const url = await new Promise<string>((res) => {
+      m.once('render', () => res(m.getCanvas().toDataURL('image/jpeg', 0.9)));
+      m.triggerRepaint();
+    });
+    m.jumpTo(cam);
+    return url;
+  }
+
   updated(changed: Map<string, unknown>) {
     if (!this.map) return;
     if (changed.has('dark') && changed.get('dark') !== undefined) {

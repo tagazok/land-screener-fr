@@ -66,6 +66,9 @@ const TIER_TEXT: Record<string, string> = { A: '#fff', B: '#14361f', C: '#3b4a1a
 /** Table rows rendered at a time; "Afficher plus" adds another page. */
 const PAGE = 200;
 
+/** Key figures in the box beside the map on the printed sheet. */
+const PRINT_KPIS = ['price_m2', 'gross_yield', 'pop_cagr_11y', 'median_income', 'apl_gp', 'risk_count', 'station_km', 'bigcity_train_min'];
+
 /** communes.json is columnar ({n, cols: {name: values[]}}): turn it into row objects once. */
 function fromColumns(d: { n: number; cols: Record<string, Row[string][]> }): Row[] {
   const names = Object.keys(d.cols);
@@ -329,13 +332,25 @@ export class AppRoot extends LitElement {
   }
 
   /** Print the open commune's sheet (or save it as PDF): every section unfolded, the rest of the page hidden. */
-  private printSheet() {
+  private async printSheet() {
     const closed = [...this.renderRoot.querySelectorAll<HTMLDetailsElement>('.sidenav details:not([open])')];
     closed.forEach((d) => (d.open = true));
-    const restore = () => { closed.forEach((d) => (d.open = false)); window.removeEventListener('afterprint', restore); };
+    const r = this.raw.find((x) => x.code === this.selected);
+    this.printMap = r ? await this.mapView?.snapshot(r.code, r.lon as number, r.lat as number) ?? null : null;
+    const restore = () => {
+      closed.forEach((d) => (d.open = false));
+      this.printMap = null;
+      window.removeEventListener('afterprint', restore);
+    };
     window.addEventListener('afterprint', restore);
-    this.updateComplete.then(() => window.print());
+    await this.updateComplete;
+    // Let the map picture decode before the print preview is laid out.
+    await this.renderRoot.querySelector<HTMLImageElement>('.pmap')?.decode().catch(() => undefined);
+    window.print();
   }
+
+  /** Map picture of the commune shown on the printed sheet (set only while printing). */
+  @state() private printMap: string | null = null;
 
   private favButton(code: string, label = false) {
     const on = this.favorites.includes(code);
@@ -1097,6 +1112,8 @@ export class AppRoot extends LitElement {
     const t = r.pass && r.tier ? r.tier : 'fail';
     return html`
       <aside class="sidenav" aria-label="Détails : ${row.nom}">
+        <div class="printonly pbar"><b>Land Screener FR</b>
+          <span>Fiche commune · stratégie « ${STRATEGIES.find((s) => s.id === this.strategy)?.label} » · ${new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</span></div>
         <div class="sn-head">
           <div class="sn-title">
             <span class="tier big" style="background:${TIER_COLORS[t]};color:${TIER_TEXT[t]}">${r.pass ? r.tier : '–'}</span>
@@ -1106,6 +1123,7 @@ export class AppRoot extends LitElement {
               ${row.postcodes ? html`<small class="cp" title="Codes postaux">${String(row.postcodes).split(' ').length > 4
                 ? `${String(row.postcodes).split(' ').slice(0, 3).join(', ')}… (${String(row.postcodes).split(' ').length} codes postaux)`
                 : String(row.postcodes).split(' ').join(', ')}</small>` : nothing}
+              <small class="printonly">Département ${row.dep} · code INSEE ${row.code}${row.aav_name ? ` · aire de ${row.aav_name}` : ''}</small>
               <div class="sn-acts">
                 ${this.favButton(row.code, true)}
                 <button class="btn small" title="Comparer cette commune avec d’autres, côte à côte"
@@ -1114,10 +1132,15 @@ export class AppRoot extends LitElement {
               </div>
             </div>
           </div>
+          ${r.pass ? html`<div class="printonly pscore"><b>${fmt('score', r.score)}</b><small>/100</small><span>score · groupe ${r.tier}</span></div>` : nothing}
           <button class="close" aria-label="Fermer le panneau" title="Fermer (Échap)" @click=${() => this.select(null)}>×</button>
         </div>
         <div class="sn-body">
-          <p class="printonly">Land Screener FR · stratégie « ${STRATEGIES.find((s) => s.id === this.strategy)?.label} » · fiche du ${new Date().toLocaleDateString('fr-FR')} · données du ${this.meta ? new Date(this.meta.built).toLocaleDateString('fr-FR') : ''} · ${location.href}</p>
+          <div class="printonly ptop">
+            ${this.printMap ? html`<img class="pmap" src=${this.printMap} alt="Carte de ${row.nom}">` : nothing}
+            <div class="pkpi">${PRINT_KPIS.filter((c) => c in COLUMNS).map((c) => html`
+              <div class=${judge(c, row[c]) ?? ''}><span>${COLUMNS[c].label}</span><b>${fmt(c, row[c])}</b></div>`)}</div>
+          </div>
           ${r.pass
             ? html`<div class="sn-score">
                 <div><span class="label">Score ${tip('Score', HELP.score)}</span><b>${fmt('score', r.score)}</b><small>/100</small></div>
@@ -1144,6 +1167,7 @@ export class AppRoot extends LitElement {
                 <ul>${hl.bad.map((c) => html`<li class=${judge(c, row[c]) ?? ''}><span>${COLUMNS[c].label}</span><b>${fmt(c, row[c])}</b></li>`)}</ul></div>` : nothing}
             </div>` : nothing}
 
+          <div class="sn-more">
           ${r.pass ? html`
             <details open class="grp">
               <summary>Rang par critère ${tip('Rang par critère', HELP.parts)}</summary>
@@ -1165,7 +1189,7 @@ export class AppRoot extends LitElement {
           ${this.detailWarnings(row)}
           ${this.strategy === 'parking' ? this.renderParkingSimulation(row) : this.renderSimulation(row)}
           ${this.renderHistory(row)}
-          <details class="grp" @toggle=${(e: Event) => { if (!(e.target as HTMLDetailsElement).open) this.mapView?.mark(null); }}>
+          <details class="grp addr" @toggle=${(e: Event) => { if (!(e.target as HTMLDetailsElement).open) this.mapView?.mark(null); }}>
             <summary>Risques à une adresse${tip('Risques à une adresse', 'Tapez une adresse de la commune : l’application interroge Géorisques (Ministère de la Transition écologique) et affiche les risques à ce point précis, à côté de ceux de la commune. C’est la même source que l’état des risques d’une vente, mais ce n’est pas un document officiel.')}</summary>
             <address-risk .code=${row.code} .commune=${row.nom}
               @locate=${(e: CustomEvent<{ lon: number; lat: number }>) => { this.mapView?.mark([e.detail.lon, e.detail.lat]); this.mapView?.flyTo(e.detail.lon, e.detail.lat, 15); }}></address-risk>
@@ -1178,7 +1202,10 @@ export class AppRoot extends LitElement {
               <dl>${g.columns.filter((c) => c in COLUMNS).map((c) => html`
                 <dt>${COLUMNS[c].label}${colTip(c)}</dt><dd>${val(c, row[c])}</dd>`)}</dl>
             </details>`)}
+          </div>
           <p class="code">Code INSEE ${row.code}</p>
+          <p class="printonly pfoot">Données publiques (INSEE, DVF, ANIL, Géorisques, ministères de la Santé et de l’Intérieur, SNCF, ATMO…), construites le ${this.meta ? new Date(this.meta.built).toLocaleDateString('fr-FR') : '—'}. Les chiffres sont à l’échelle de la commune ; ce n’est pas un conseil en investissement.
+            <br>Fiche en ligne : ${location.origin + location.pathname + location.hash}</p>
         </div>
       </aside>`;
   }
@@ -1445,7 +1472,8 @@ export class AppRoot extends LitElement {
       font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
       -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums;
     }
-    :host([data-theme='dark']) {
+    /* Paper is always light, whatever the screen theme. */
+    @media screen { :host([data-theme='dark']) {
       --bg: #0f1714; --surface: #16211c; --ink: #e4ece7; --muted: #9db0a6; --faint: #74867c; --line: #25342d;
       --brand: #2a8f5a; --brand-2: #3fb877; --brand-soft: #1b3729;
       --good: #6fd597; --good-bg: #163525; --bad: #ff8f80; --bad-bg: #3c1f1b; --warn: #f2b860; --warn-bg: #3a2b14;
@@ -1453,7 +1481,7 @@ export class AppRoot extends LitElement {
       --surface-2: #1b2822; --surface-3: #23322b; --ink-2: #c9d6cf; --hover: #1c2b24; --th-bg: #19251f; --row-line: #1f2c26;
       --track: #2b3a33; --input-bg: #111b17; --input-line: #33453c; --switch-off: #3a4a42; --seg-bg: #22302a;
       --note-fg: #f5d9a8; --glass: rgba(22,33,28,.94); --tip-btn: #2a3a33; --tip-btn-fg: #c3d1ca;
-    }
+    } }
     button { font: inherit; color: inherit; }
     .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--line); }
 
@@ -1734,17 +1762,63 @@ export class AppRoot extends LitElement {
 
     /* ---- print: the commune sheet, or the comparison page, alone on paper ---- */
     .printonly { display: none; }
+    .sn-more { display: contents; }
     @media print {
-      :host { --shadow: none; }
-      header, ai-chat, .loading, .backdrop, .drawer, .close, .sn-acts { display: none !important; }
+      :host { --shadow: none; --bg: #fff; background: #fff; min-height: 0; font-size: 9pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      header, ai-chat, .loading, .backdrop, .drawer, .close, .sn-acts, .ads, .sn-score, .code, info-tip,
+      .grp .link, .sim .link, .grp.addr:not(:has(address-risk[reported])) { display: none !important; }
       .layout { display: block !important; }
       .layout.has-detail > main { display: none !important; }
-      .sidenav { position: static !important; height: auto !important; width: auto !important; border: 0 !important; box-shadow: none !important; }
-      .sn-body { overflow: visible !important; padding: 0 !important; }
-      .sn-head { padding: 0 0 10px !important; }
-      .grp, .hl, .sim, .ai, .note { break-inside: avoid; }
-      address-risk input { display: none; }
-      .printonly { display: block; font-size: 11px; color: #555; margin: 0 0 8px; }
+      .sidenav { position: static !important; height: auto !important; width: auto !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; background: #fff !important; }
+      .layout, main { background: #fff !important; min-height: 0 !important; }
+      .printonly { display: block; }
+
+      /* header: brand line, then the commune and its score */
+      .pbar { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-bottom: 2px solid var(--brand); padding-bottom: 4px; margin-bottom: 10px; font-size: 8pt; color: var(--muted); }
+      .pbar b { color: var(--brand); font-size: 10pt; letter-spacing: .02em; }
+      .sn-head { padding: 0 0 10px !important; border: 0 !important; align-items: center !important; }
+      .sn-head h3 { font-size: 21pt; line-height: 1.1; }
+      .sn-head small { font-size: 8.5pt; display: block; }
+      .tier.big { width: 48px; height: 48px; border-radius: 12px; font-size: 24px; }
+      .pscore { text-align: right; white-space: nowrap; }
+      .pscore b { font-size: 24pt; font-weight: 750; letter-spacing: -.02em; color: var(--brand); }
+      .pscore small { display: inline; color: var(--faint); font-size: 10pt; }
+      .pscore span { display: block; font-size: 7.5pt; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+
+      /* map + key figures */
+      .sn-body { overflow: visible !important; padding: 0 !important; gap: 10px !important; }
+      .ptop { display: grid; grid-template-columns: 1.15fr 1fr; gap: 10px; break-inside: avoid; }
+      .ptop:not(:has(.pmap)) { grid-template-columns: 1fr; }
+      .pmap { display: block; width: 100%; height: 64mm; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+      .pkpi { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
+      .ptop:not(:has(.pmap)) .pkpi { grid-template-columns: repeat(4, 1fr); }
+      .pkpi div { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
+      .pkpi span { display: block; font-size: 7.5pt; color: var(--muted); line-height: 1.25; }
+      .pkpi b { font-size: 13pt; font-weight: 700; letter-spacing: -.01em; }
+      .pkpi .good b { color: var(--good); } .pkpi .bad b { color: var(--bad); } .pkpi .warn b { color: var(--warn); }
+
+      .ai { padding: 8px 11px; break-inside: avoid; }
+      .ai p { font-size: 9pt; line-height: 1.45; margin-top: 3px; }
+      .failbox { font-size: 9pt; }
+      .hl { grid-template-columns: 1fr 1fr !important; gap: 10px; align-items: start; }
+      .hl-col { padding: 7px 10px; }
+      .hl-col h4 { font-size: 8pt; margin-bottom: 4px; break-after: avoid; }
+      .hl-col ul { gap: 1px; } .hl-col li { font-size: 8.5pt; break-inside: avoid; }
+
+      /* everything else flows in two columns of compact tables */
+      .sn-more { display: block; columns: 2; column-gap: 18px; }
+      .sn-more > * { break-inside: avoid; margin: 0 0 11px; }
+      .grp { border: 0; border-radius: 0; padding: 0; }
+      .grp summary { padding: 0 0 3px; margin-bottom: 4px; border-bottom: 1.5px solid var(--brand); color: var(--brand); font-size: 8pt; cursor: default; }
+      .grp summary::before { display: none; }
+      .grp dl { gap: 0; font-size: 8.5pt; margin: 0; }
+      .grp dt, .grp dd { padding: 2px 0; border-bottom: 1px solid var(--row-line); }
+      .grp dd { padding: 2px 3px 2px 10px; }
+      .grp dd span { padding-top: 0 !important; padding-bottom: 0 !important; }
+      .parts { gap: 2px; } .parts div { font-size: 8.5pt; grid-template-columns: 1fr 70px 22px; }
+      .note { font-size: 8pt; padding: 6px 9px; }
+      .grp .muted, .grp .small { font-size: 7.5pt; }
+      .pfoot { font-size: 7.5pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 6px; margin: 0; break-inside: avoid; }
     }
 
     /* ---- settings drawer ---- */
